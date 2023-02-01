@@ -60,6 +60,7 @@ saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultarray) 
     //
     printf("Copying device result array to CPU\n");
     cudaMemcpy(resultarray, device_result, N, cudaMemcpyDeviceToHost);
+    printf("Finished Copying device result array to CPU\n");
 
     // end timing after result has been copied back into host memory
     double endTime = CycleTimer::currentSeconds();
