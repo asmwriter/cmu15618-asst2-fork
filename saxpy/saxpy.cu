@@ -35,9 +35,9 @@ saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultarray) 
     //
     // TODO allocate device memory buffers on the GPU using cudaMalloc
     //
-    cudaMalloc(&device_x, N);
-    cudaMalloc(&device_y, N);
-    cudaMalloc(&device_result, N);
+    cudaMalloc(&device_x, N*sizeof(float));
+    cudaMalloc(&device_y, N*sizeof(float));
+    cudaMalloc(&device_result, N*sizeof(float));
 
     
     // start timing after allocation of device memory
@@ -48,7 +48,9 @@ saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultarray) 
     //
     printf("Copying host arrays x and y to GPU\n");
     cudaMemcpy(device_x, xarray, N, cudaMemcpyHostToDevice);
+    
     cudaMemcpy(device_y, yarray, N, cudaMemcpyHostToDevice);
+    
     printf("Finished Copying host arrays x and y\n");
 
     // run kernel
