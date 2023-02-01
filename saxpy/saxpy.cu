@@ -47,9 +47,9 @@ saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultarray) 
     // TODO copy input arrays to the GPU using cudaMemcpy
     //
     //printf("Copying host arrays x and y to GPU\n");
-    cudaMemcpy(device_x, xarray, N, cudaMemcpyHostToDevice);
+    cudaMemcpy(device_x, xarray, N*sizeof(float), cudaMemcpyHostToDevice);
     
-    cudaMemcpy(device_y, yarray, N, cudaMemcpyHostToDevice);
+    cudaMemcpy(device_y, yarray, N*sizeof(float), cudaMemcpyHostToDevice);
     
     //printf("Finished Copying host arrays x and y\n");
 
@@ -61,7 +61,7 @@ saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultarray) 
     // TODO copy result from GPU using cudaMemcpy
     //
     //printf("Copying device result array to CPU\n");
-    cudaMemcpy(resultarray, device_result, N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(resultarray, device_result, N*sizeof(float), cudaMemcpyDeviceToHost);
     //printf("Finished Copying device result array to CPU\n");
 
     // end timing after result has been copied back into host memory
