@@ -11,7 +11,7 @@
 
 #include "CycleTimer.h"
 
-#define TPB 4
+#define TPB 8
 
 
 extern float toBW(int bytes, float sec);
@@ -34,34 +34,33 @@ static inline int nextPow2(int n)
 __global__ void exclusive_scan_kernel (int length, int* in_array) {
 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
+   
     int threadIndex = threadIdx.x;
-    int offset = 1;
 
     extern __shared__ int temp[];
 
-    //Load input into the shared memory
-    temp[2*threadIndex] = in_array[2*index];
-    temp[2*threadIndex+1] = in_array[2*index+1];
+    // //Load input into the shared memory
+    temp[threadIndex] = in_array[index];
+    //temp[threadIndex+1] = in_array[index+1];
 
-    // printf("Index from kernel %d", index);
+    int offset = 1, active = 2;
+    
+    //Up-sweep
+    for(int d = length/2; d>0; d=d/2) {
+        if(threadIndex %active == active-1){
 
-    int cur = (2*threadIndex+1)-1;
-    int next = (2*threadIndex+2)-1;
+            // __syncthreads();             
 
-    temp[next] += temp[cur];
+            temp[threadIndex] += temp[threadIndex-offset];
 
-    // Up-sweep
-    // for(int d = blockDim.x/2; d>0; d=d/2) {
-    //     __syncthreads(); 
+            offset*=2;
+            active*=2;
+        }
+    }
 
-    //     if(threadIndex < d) {
-    //         int cur = offset*(2*threadIndex+1)-1;
-    //         int next = offset*(2*threadIndex+2)-1;
+    __syncthreads();
 
-    //         temp[next] += temp[cur];
-    //     }
-    //     offset*=2;
-    // }
+    in_array[index] = temp[threadIndex];
 
     // if(threadIndex == 0) {
     //     temp[length-1] = 0;
@@ -82,13 +81,6 @@ __global__ void exclusive_scan_kernel (int length, int* in_array) {
     //     }
     // }
 
-    // __syncthreads();
-
-    in_array[2*index] = temp[2*threadIndex];
-    in_array[2*index+1] = temp[2*threadIndex+1];
-
-    // in_array[5] = index;
-    // in_array[6] = offset;
 
 
 }
@@ -108,19 +100,22 @@ void exclusive_scan(int* device_data, int length)
      * power of 2 larger than the input.
      */
     int pow_length = nextPow2(length);
-    int chunk_size = 4;
+    int chunk_size = TPB;
     int num_block;
     int threads_per_block = TPB;
     
-    num_block = pow_length/threads_per_block;
+    num_block = pow_length/chunk_size;
 
     printf("num block %d", num_block);
 
-    exclusive_scan_kernel<<<num_block, threads_per_block>>>(chunk_size, device_data);
-    // cudaThreadSynchronize();
-        
+    exclusive_scan_kernel<<<num_block, threads_per_block, threads_per_block*sizeof(int)>>>(chunk_size, device_data);
+    cudaThreadSynchronize();
+    cudaError_t errCode = cudaPeekAtLastError();
+    if (errCode != cudaSuccess) {
+        fprintf(stderr, "WARNING: A CUDA error occured: code=%d, %s\n", errCode, cudaGetErrorString(errCode));
+    }
 
-    
+    return;
 }
 
 /* This function is a wrapper around the code you will write - it copies the
