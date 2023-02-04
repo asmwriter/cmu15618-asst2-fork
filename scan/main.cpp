@@ -161,6 +161,10 @@ int main(int argc, char** argv)
         } 
 
         for(int i = 0 ;i <N; i++){
+            printf("checkarray[%d]=%d\n", i, checkarray[i]);
+        }
+
+        for(int i = 0 ;i <N; i++){
             printf("result_array[%d]=%d\n", i, resultarray[i]);
         }
 
