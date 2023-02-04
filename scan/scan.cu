@@ -47,7 +47,7 @@ __global__ void exclusive_scan_kernel (int length, int* in_array) {
     
     //Up-sweep
     for(int d = length/2; d>0; d=d/2) {
-        if(threadIndex %active == active-1){
+        if(threadIndex % active == active-1){
 
             // __syncthreads();             
 
@@ -60,29 +60,30 @@ __global__ void exclusive_scan_kernel (int length, int* in_array) {
 
     __syncthreads();
 
+
+    
+    if(threadIndex == 0) {
+        temp[length-1] = 0;
+    }
+
+    
+    //Down-sweep
+    for(int d = 1; d<length; d*=2) {
+        offset /= 2;
+        active /= 2;
+        __syncthreads();
+
+        if(threadIndex % active == active-1) {
+            int cur = threadIndex;
+            int next = threadIndex-offset;
+
+            int t = temp[cur];
+            temp[next] = temp[cur];
+            temp[cur] += t;
+        }
+    }
+    
     in_array[index] = temp[threadIndex];
-
-    // if(threadIndex == 0) {
-    //     temp[length-1] = 0;
-    // }
-
-    // //Down-sweep
-    // for(int a = 1; a<length; a*=2) {
-    //     offset /= 2;
-    //     __syncthreads();
-
-    //     if(threadIndex < a) {
-    //         int cur = offset*(2*threadIndex+1)-1;
-    //         int next = offset*(2*threadIndex+2)-1;
-
-    //         int t = temp[cur];
-    //         temp[cur] = temp[next];
-    //         temp[next] += t;
-    //     }
-    // }
-
-
-
 }
 
 void exclusive_scan(int* device_data, int length)
