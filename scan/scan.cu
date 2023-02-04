@@ -31,7 +31,7 @@ static inline int nextPow2(int n)
     return n;
 }
 
-__global__ void exclusive_scan_kernel (int length, int* in_array) {
+__global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chunk_sum) {
 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
    
@@ -58,14 +58,15 @@ __global__ void exclusive_scan_kernel (int length, int* in_array) {
         }
     }
 
+   
     __syncthreads();
-
 
     
     if(threadIndex == length-1) {
+        next_chunk_sum[index] = temp[length-1];
         temp[length-1] = 0;
     }
-
+    
     
     //Down-sweep
 
@@ -92,7 +93,7 @@ __global__ void exclusive_scan_kernel (int length, int* in_array) {
     in_array[index] = temp[threadIndex];
 }
 
-void exclusive_scan(int* device_data, int length)
+void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
 {
     /* TODO
      * Fill in this function with your exclusive scan implementation.
@@ -115,7 +116,7 @@ void exclusive_scan(int* device_data, int length)
 
     printf("num block %d", num_block);
 
-    exclusive_scan_kernel<<<num_block, threads_per_block, threads_per_block*sizeof(int)>>>(chunk_size, device_data);
+    exclusive_scan_kernel<<<num_block, threads_per_block, threads_per_block*sizeof(int)>>>(chunk_size, device_data, device_next_chunk_sum);
     cudaThreadSynchronize();
     cudaError_t errCode = cudaPeekAtLastError();
     if (errCode != cudaSuccess) {
@@ -132,6 +133,8 @@ void exclusive_scan(int* device_data, int length)
 double cudaScan(int* inarray, int* end, int* resultarray)
 {
     int* device_data;
+    int* device_next_chunk_sum;
+    
     // We round the array size up to a power of 2, but elements after
     // the end of the original input are left uninitialized and not checked
     // for correctness.
@@ -139,22 +142,52 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     // array's length is a power of 2, but this will result in extra work on
     // non-power-of-2 inputs.
     int rounded_length = nextPow2(end - inarray);
+    //Create a Host side array to hold the sum of individual blocks
+    int* next_chunk_sum = new int[rounded_length];
+    for(int idx = 0; idx < rounded_length; idx++){
+        next_chunk_sum[idx] = 0;
+    }
     cudaMalloc((void **)&device_data, sizeof(int) * rounded_length);
+    cudaMalloc((void **)&device_next_chunk_sum, sizeof(int) * rounded_length);
 
+    //Copy input array and next chunk temp array to GPU
     cudaMemcpy(device_data, inarray, (end - inarray) * sizeof(int),
+               cudaMemcpyHostToDevice);
+    cudaMemcpy(device_next_chunk_sum, next_chunk_sum, (end - inarray) * sizeof(int),
                cudaMemcpyHostToDevice);
 
     double startTime = CycleTimer::currentSeconds();
 
-    exclusive_scan(device_data, end - inarray);
+    exclusive_scan(device_data, end - inarray, device_next_chunk_sum);
 
     // Wait for any work left over to be completed.
     cudaThreadSynchronize();
     double endTime = CycleTimer::currentSeconds();
     double overallDuration = endTime - startTime;
 
+    //Transfer input and next chunk sum array from GPU to CPU
     cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
                cudaMemcpyDeviceToHost);
+    cudaMemcpy(next_chunk_sum, device_next_chunk_sum, (end - inarray) * sizeof(int),
+               cudaMemcpyDeviceToHost);
+    printf("next_chunk_sum contents:\n");
+    for(int idx = 0; idx < rounded_length; idx++){
+        printf("next_chunk_sum[%d]=%d\n", idx, next_chunk_sum[idx]);
+    }
+    printf("\n");
+    //Do serial prefix sum across blocks for now
+    //TODO: Launch num_block kernels sequentially to improve perf
+    //and move this computation to exclusive_scan()
+    int block_dim = TPB;
+    int next_block_sum = next_chunk_sum[block_dim-1];
+    for(int idx = block_dim; idx < rounded_length; idx++){
+        resultarray[idx] += next_block_sum;
+        if(idx % block_dim == block_dim-1){
+            next_block_sum += next_chunk_sum[idx];
+        }
+    }
+    
+    delete[] next_chunk_sum;
     return overallDuration;
 }
 
