@@ -62,27 +62,27 @@ __global__ void exclusive_scan_kernel (int length, int* in_array) {
 
 
     
-    if(threadIndex == 0) {
-        temp[length-1] = 0;
+    if(threadIndex == length-1) {
+        temp[length-1] = active;
     }
 
     
     //Down-sweep
-    for(int d = 1; d<length; d*=2) {
-        offset /= 2;
-        active /= 2;
-        __syncthreads();
+    // for(int d = 1; d<length; d*=2) {
+    //     offset /= 2;
+    //     active /= 2;
+    //     __syncthreads();
 
-        if(threadIndex % active == active-1) {
-            int cur = threadIndex;
-            int next = threadIndex-offset;
+    //     if(threadIndex % active == active-1) {
+    //         int cur = threadIndex;
+    //         int next = threadIndex-offset;
 
-            int t = temp[cur];
-            temp[next] = temp[cur];
-            temp[cur] += t;
-        }
-    }
-    
+    //         int t = temp[cur];
+    //         temp[cur] += temp[next];
+    //         temp[next] = t;
+    //     }
+    // }
+    __syncthreads();
     in_array[index] = temp[threadIndex];
 }
 
