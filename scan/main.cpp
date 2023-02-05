@@ -137,6 +137,17 @@ int main(int argc, char** argv)
             inarray[i] = i % 2;
             checkarray[i] = i % 2;
         }  
+        // for(int i = 0; i < N; i++) {
+        //     if( (i % (N/4)) == (N/4-1)){
+        //         inarray[i] = 4;
+        //         checkarray[i] = 4;
+        //     }
+        //     else{
+        //         inarray[i] = 0;
+        //         checkarray[i] = 0;
+        //     }
+            
+        // }  
     }
 
     printCudaInfo();

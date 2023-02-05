@@ -14,6 +14,20 @@
 #define TPB 8
 #define DEBUG 1
 
+#ifdef DEBUG
+#define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
+inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+    if (code != cudaSuccess)
+{
+fprintf(stderr, "CUDA Error: %s at %s:%d\n",
+cudaGetErrorString(code), file, line);
+if (abort) exit(code);
+}
+}
+#else
+#define cudaCheckError(ans) ans
+#endif
 
 extern float toBW(int bytes, float sec);
 
@@ -64,7 +78,9 @@ __global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chun
 
     
     if(threadIndex == length-1) {
-        next_chunk_sum[index] = temp[length-1];
+        if(next_chunk_sum){
+            next_chunk_sum[blockIdx.x] = temp[length-1];
+        }
         temp[length-1] = 0;
     }
     
@@ -115,14 +131,9 @@ void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
     
     num_block = pow_length/chunk_size;
 
-    printf("num block %d", num_block);
+    printf("num blocks: %d\n", num_block);
 
     exclusive_scan_kernel<<<num_block, threads_per_block, threads_per_block*sizeof(int)>>>(chunk_size, device_data, device_next_chunk_sum);
-    cudaThreadSynchronize();
-    cudaError_t errCode = cudaPeekAtLastError();
-    if (errCode != cudaSuccess) {
-        fprintf(stderr, "WARNING: A CUDA error occured: code=%d, %s\n", errCode, cudaGetErrorString(errCode));
-    }
 
     return;
 }
@@ -137,6 +148,8 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     int* device_data;
     //GPU pointer for holding upsweep sum of intermediate blocks/scanned upsweep sums
     int* device_inter_sum_array;
+    //Debug GPU pointer
+    int* device_debug_inter_sum_array;
     
     // We round the array size up to a power of 2, but elements after
     // the end of the original input are left uninitialized and not checked
@@ -147,53 +160,101 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     int rounded_length = nextPow2(end - inarray);
 
     //Allocate GPU memory for input array
-    cudaMalloc((void **)&device_data, sizeof(int) * rounded_length);
+    cudaCheckError(
+    cudaMalloc((void **)&device_data, sizeof(int) * rounded_length)
+    );
     //Allocate GPU memory for holding upsweep reduced sums/scanned sums
-    cudaMalloc((void **)&device_inter_sum_array, sizeof(int) * rounded_length);
-    
+    cudaCheckError(
+    cudaMalloc((void **)&device_inter_sum_array, sizeof(int) * rounded_length)
+    );
+    //Allocate GPU memory for debug array
+    cudaCheckError(
+    cudaMalloc((void **)&device_debug_inter_sum_array, sizeof(int) * rounded_length)
+    );
     //Copy input array and next chunk temp array to GPU
-    cudaMemcpy(device_data, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice);
-    
+    cudaCheckError(
+    cudaMemcpy(device_data, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice)
+    );
     //Initialise upsweep sum array and scanned sum array
-    cudaMemset(device_inter_sum_array,0,rounded_length*sizeof(int));
-
+    cudaCheckError(
+    cudaMemset(device_inter_sum_array,0,rounded_length*sizeof(int))
+    );
     double startTime = CycleTimer::currentSeconds();
+
+    printf("Computing exclusive scan of input array\n");
 
     //Perform exclusive scan on input array
     exclusive_scan(device_data, end - inarray, device_inter_sum_array);
 
+    printf("Completed computation of exclusive scan of input array\n");
+
     // Wait for any work left over to be completed.
-    cudaThreadSynchronize();
+    cudaCheckError(
+    cudaThreadSynchronize()
+    );
+
+    #ifdef DEBUG
+        printf("/*DEBUG - INPUT ARRAY*/ \n");
+        for(int idx = 0; idx < rounded_length; idx++){
+            printf("inarray[%d]=%d\n",idx,inarray[idx]);
+        }
+        int* inter_sum_array;
+        inter_sum_array = new int[rounded_length];
+        cudaCheckError(
+        cudaMemcpy(inter_sum_array, device_inter_sum_array, rounded_length * sizeof(int),
+                cudaMemcpyDeviceToHost)
+        );
+        printf("/*DEBUG - UPSWEEP SUM ARRAY*/ \n");
+        for(int idx = 0; idx < rounded_length; idx++){
+            printf("inter_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
+        }
+    #endif
 
     //Perform exclusive scan on upsweep sum array
-    exclusive_scan(device_inter_sum_array, end - inarray, nullptr);
+    exclusive_scan(device_inter_sum_array, rounded_length, device_debug_inter_sum_array);
 
+    // Wait for any work left over to be completed.
+    cudaCheckError(cudaThreadSynchronize());
     //Perform vector sum of scanned input and scanned sum array
-
 
     double endTime = CycleTimer::currentSeconds();
     double overallDuration = endTime - startTime;
 
     //Transfer input and next chunk sum array from GPU to CPU
+    cudaCheckError(
     cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
-               cudaMemcpyDeviceToHost);
+               cudaMemcpyDeviceToHost)
+    );
     
     #ifdef DEBUG
-        int* inter_sum_array;
-        inter_sum_array = new int[rounded_length];
+        cudaCheckError(
         cudaMemcpy(inter_sum_array, device_inter_sum_array, rounded_length * sizeof(int),
-                cudaMemcpyDeviceToHost);
-        
-        printf("/*DEBUG - RESULT ARRAY*/ ");
+                cudaMemcpyDeviceToHost)
+        );
+
+        printf("/*DEBUG - RESULT ARRAY*/ \n");
         for(int idx = 0; idx < rounded_length; idx++){
-            printf("resultarray[%idx]=%d\n",idx,resultarray[idx]);
+            printf("resultarray[%d]=%d\n",idx,resultarray[idx]);
         }
         
-        printf("/*DEBUG - UPSWEEP SCANNED SUM ARRAY*/ ");
+        printf("/*DEBUG - UPSWEEP SCANNED SUM ARRAY*/ \n");
         for(int idx = 0; idx < rounded_length; idx++){
-            printf("inter_sum_array[%idx]=%d\n",idx,inter_sum_array[idx]);
+            printf("inter_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
         }
+
+        int* debug_inter_sum_array;
+        debug_inter_sum_array = new int[rounded_length];
+        cudaCheckError(
+        cudaMemcpy(debug_inter_sum_array, device_debug_inter_sum_array, rounded_length * sizeof(int),
+                cudaMemcpyDeviceToHost)
+        );
+        printf("/*DEBUG - UPSWEEP SUM ARRAY-stage2*/ \n");
+        for(int idx = 0; idx < rounded_length; idx++){
+            printf("debug_inter_sum_array[%d]=%d\n",idx,debug_inter_sum_array[idx]);
+        }
+
         delete[] inter_sum_array;
+        delete[] debug_inter_sum_array;
     #endif
 
     return overallDuration;
