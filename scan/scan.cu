@@ -46,6 +46,26 @@ static inline int nextPow2(int n)
     return n;
 }
 
+__global__ void scalar_vector_sum_kernel (int* scanned_array, int* incr) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int scalar = incr[blockIdx.x];
+    scanned_array[index] += scalar;
+}
+
+void scalar_vector_sum (int* scanned_array, int* incr, int length){
+    int pow_length = nextPow2(length);
+    int chunk_size = TPB;
+    int num_block;
+    int threads_per_block = TPB;
+    
+    num_block = pow_length/chunk_size;
+
+    printf("num blocks in sum kernel: %d\n", num_block);
+
+    scalar_vector_sum_kernel<<<num_block,TPB,TPB*sizeof(int)>>>(scanned_array, incr);
+    return;
+}
+
 __global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chunk_sum) {
 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -138,6 +158,8 @@ void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
     return;
 }
 
+
+
 /* This function is a wrapper around the code you will write - it copies the
  * input to the GPU and times the invocation of the exclusive_scan() function
  * above. You should not modify it.
@@ -210,15 +232,15 @@ double cudaScan(int* inarray, int* end, int* resultarray)
         }
     #endif
 
+    printf("Computing exclusive scan of intermediate sum array\n");
+
     //Perform exclusive scan on upsweep sum array
-    exclusive_scan(device_inter_sum_array, rounded_length, device_debug_inter_sum_array);
+    exclusive_scan(device_inter_sum_array, TPB, nullptr);
+
+    printf("Completed computation of exclusive scan of intermediate sum array\n");
 
     // Wait for any work left over to be completed.
     cudaCheckError(cudaThreadSynchronize());
-    //Perform vector sum of scanned input and scanned sum array
-
-    double endTime = CycleTimer::currentSeconds();
-    double overallDuration = endTime - startTime;
 
     //Transfer input and next chunk sum array from GPU to CPU
     cudaCheckError(
@@ -242,20 +264,35 @@ double cudaScan(int* inarray, int* end, int* resultarray)
             printf("inter_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
         }
 
-        int* debug_inter_sum_array;
-        debug_inter_sum_array = new int[rounded_length];
-        cudaCheckError(
-        cudaMemcpy(debug_inter_sum_array, device_debug_inter_sum_array, rounded_length * sizeof(int),
-                cudaMemcpyDeviceToHost)
-        );
-        printf("/*DEBUG - UPSWEEP SUM ARRAY-stage2*/ \n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("debug_inter_sum_array[%d]=%d\n",idx,debug_inter_sum_array[idx]);
-        }
-
         delete[] inter_sum_array;
-        delete[] debug_inter_sum_array;
     #endif
+
+    printf("Launching scalar vector sum kernel\n");
+
+    //Perform vector sum of scanned input and scanned sum array
+    scalar_vector_sum(device_data, device_inter_sum_array, rounded_length);
+
+    printf("Finished computing scalar vector sum kernel\n");
+
+    // Wait for any work left over to be completed.
+    cudaCheckError(cudaThreadSynchronize());
+
+    cudaCheckError(
+    cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
+               cudaMemcpyDeviceToHost)
+    );
+
+    #ifdef DEBUG
+
+        printf("/*DEBUG - RESULT ARRAY*/ \n");
+        for(int idx = 0; idx < rounded_length; idx++){
+            printf("resultarray[%d]=%d\n",idx,resultarray[idx]);
+        }
+    #endif
+
+    double endTime = CycleTimer::currentSeconds();
+    double overallDuration = endTime - startTime;
+
 
     return overallDuration;
 }
