@@ -170,11 +170,11 @@ double cudaScan(int* inarray, int* end, int* resultarray)
                cudaMemcpyDeviceToHost);
     cudaMemcpy(next_chunk_sum, device_next_chunk_sum, (end - inarray) * sizeof(int),
                cudaMemcpyDeviceToHost);
-    printf("next_chunk_sum contents:\n");
-    for(int idx = 0; idx < rounded_length; idx++){
-        printf("next_chunk_sum[%d]=%d\n", idx, next_chunk_sum[idx]);
-    }
-    printf("\n");
+    // printf("next_chunk_sum contents:\n");
+    // for(int idx = 0; idx < rounded_length; idx++){
+    //     printf("next_chunk_sum[%d]=%d\n", idx, next_chunk_sum[idx]);
+    // }
+    // printf("\n");
     //Do serial prefix sum across blocks for now
     //TODO: Launch num_block kernels sequentially to improve perf
     //and move this computation to exclusive_scan()

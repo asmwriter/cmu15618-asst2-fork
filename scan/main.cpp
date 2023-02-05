@@ -160,13 +160,13 @@ int main(int argc, char** argv)
             printf("GPU_time: %.3f ms\n", 1000.f * cudaTime);
         } 
 
-        for(int i = 0 ;i <N; i++){
-            printf("checkarray[%d]=%d\n", i, checkarray[i]);
-        }
+        // for(int i = 0 ;i <N; i++){
+        //     printf("checkarray[%d]=%d\n", i, checkarray[i]);
+        // }
 
-        for(int i = 0 ;i <N; i++){
-            printf("result_array[%d]=%d\n", i, resultarray[i]);
-        }
+        // for(int i = 0 ;i <N; i++){
+        //     printf("result_array[%d]=%d\n", i, resultarray[i]);
+        // }
 
         // validate results
         for (int i = 0; i < N; i++)
