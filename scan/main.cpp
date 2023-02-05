@@ -119,6 +119,7 @@ int main(int argc, char** argv)
     int* inarray = new int[N];
     int* resultarray = new int[N];
     int* checkarray = new int[N];
+    
 
     if (input.compare("random") == 0) {
 
