@@ -235,7 +235,8 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     printf("Computing exclusive scan of intermediate sum array\n");
 
     //Perform exclusive scan on upsweep sum array
-    exclusive_scan(device_inter_sum_array, TPB, nullptr);
+    //exclusive_scan(device_inter_sum_array, TPB, nullptr);
+    exclusive_scan_kernel<<<1, (rounded_length/1024), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
 
     printf("Completed computation of exclusive scan of intermediate sum array\n");
 
