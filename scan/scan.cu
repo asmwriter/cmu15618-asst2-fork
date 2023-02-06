@@ -68,7 +68,7 @@ void scalar_vector_sum (int* scanned_array, int* incr, int length){
 
 __global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chunk_sum) {
 
-    int base_index = blockIdx.x * blockDim.x;
+    int base_index = blockIdx.x * 2 * blockDim.x;
    
     int threadIndex = threadIdx.x;
 
@@ -76,17 +76,17 @@ __global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chun
 
     // //Load input into the shared memory
     temp[2*threadIndex] = in_array[base_index + (2*threadIndex)];
-    temp[2*threadIndex+1] = in_array[base_index + (2*threadIndex+1)];
+    temp[2*threadIndex+1] = in_array[base_index + (2*threadIndex)+1];
 
     int offset = 1, active = 2;
     
     //Up-sweep
-    for(int d = blockDim.x/2; d>0; d=d/2) {
+    for(int d = blockDim.x; d>0; d=d/2) {
         __syncthreads();             
-        if(threadIndex.x < d){
-            int current = offset*(2*threadIdx.x + 1) -1 
-            int next = offset*(2*threadIdx.x + 2) -1 
-            temp[next] += temp[cur];
+        if(threadIdx.x < d){
+            int current = offset*(2*threadIdx.x + 1) -1;
+            int next = offset*(2*threadIdx.x + 2) -1;
+            temp[next] += temp[current];
         }
         offset*=2;
     }
@@ -94,38 +94,35 @@ __global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chun
    
     __syncthreads();
 
-    /*
-    if(threadIndex == length-1) {
+    
+    if(threadIndex == blockDim.x-1) {
         if(next_chunk_sum){
-            next_chunk_sum[blockIdx.x] = temp[blockDim.x-1];
+            next_chunk_sum[blockIdx.x] = temp[length-1];
         }
-        temp[blockDim.x-1] = 0;
+        temp[length-1] = 0;
     }
-    */
+    
     
     //Down-sweep
-    /*
+    
     for(int d = 1; d<length; d*=2) {
-         __syncthreads();
+         offset /=2;
+	 __syncthreads();
 
-         if(threadIndex % active == active-1) {
-             int cur = threadIndex;
-             int next = threadIndex-offset;
-
+         if(threadIndex <d) {
+             int cur = offset*(2*threadIdx.x + 1) -1;
+             int next = offset*(2*threadIdx.x + 2) -1;
              int t = temp[cur];
-             temp[cur] += temp[next];
-             temp[next] = t;
+             temp[cur] = temp[next];
+             temp[next] += t;
          }
 
-         offset /= 2;
-         active /= 2;
      }
-     */
      
     __syncthreads();
-
     in_array[base_index + (2*threadIndex)] = temp[2*threadIndex] ;
-    in_array[base_index + (2*threadIndex) + 1] = temp[2*threadIndex] ;
+    in_array[base_index + (2*threadIndex) + 1] = temp[2*threadIndex+1] ;
+    
 }
 
 void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
