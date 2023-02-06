@@ -11,8 +11,8 @@
 
 #include "CycleTimer.h"
 
-#define TPB 8
-#define DEBUG 1
+#define TPB 1024
+//#define DEBUG 1
 
 #ifdef DEBUG
 #define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
@@ -227,19 +227,19 @@ double cudaScan(int* inarray, int* end, int* resultarray)
         }
     #endif
 
-    /*
+    
     printf("Computing exclusive scan of intermediate sum array\n");
 
     //Perform exclusive scan on upsweep sum array
-    //exclusive_scan(device_inter_sum_array, TPB, nullptr);
-    exclusive_scan_kernel<<<1, (rounded_length/1024), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
+    exclusive_scan(device_inter_sum_array, TPB, nullptr);
+    //exclusive_scan_kernel<<<1, (rounded_length/1024), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
 
     printf("Completed computation of exclusive scan of intermediate sum array\n");
 
     // Wait for any work left over to be completed.
     cudaCheckError(cudaThreadSynchronize());
 
-    */ 
+     
 
     //Transfer input and next chunk sum array from GPU to CPU
     cudaCheckError(
@@ -247,14 +247,8 @@ double cudaScan(int* inarray, int* end, int* resultarray)
                cudaMemcpyDeviceToHost)
     );
 
-    #ifdef DEBUG
-        printf("/*DEBUG - RESULT ARRAY*/ \n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("resultarray[%d]=%d\n",idx,resultarray[idx]);
-        }
-    #endif
 
-    /*
+    
     #ifdef DEBUG
         cudaCheckError(
         cudaMemcpy(inter_sum_array, device_inter_sum_array, rounded_length * sizeof(int),
@@ -273,8 +267,8 @@ double cudaScan(int* inarray, int* end, int* resultarray)
 
         delete[] inter_sum_array;
     #endif
-    */
-    /*
+    
+    
     printf("Launching scalar vector sum kernel\n");
 
     //Perform vector sum of scanned input and scanned sum array
@@ -289,9 +283,16 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
                cudaMemcpyDeviceToHost)
     );
-    */
+    
     
 
+    #ifdef DEBUG
+        printf("/*DEBUG - RESULT ARRAY*/ \n");
+        for(int idx = 0; idx < rounded_length; idx++){
+            printf("resultarray[%d]=%d\n",idx,resultarray[idx]);
+        }
+    #endif
+    
     double endTime = CycleTimer::currentSeconds();
     double overallDuration = endTime - startTime;
 
