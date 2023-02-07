@@ -156,7 +156,7 @@ int main(int argc, char** argv)
 
     if (test.compare("scan") == 0) { // test exclusive scan
         // run CUDA implementation
-        for (int i=0; i<3; i++) {
+        for (int i=0; i<1; i++) {
             if (useThrust)
                 cudaTime = std::min(cudaTime, cudaScanThrust(inarray, inarray+N, resultarray));
             else
@@ -176,16 +176,17 @@ int main(int argc, char** argv)
         //    printf("checkarray[%d]=%d\n", i, checkarray[i]);
         //}
 
-        // for(int i = 0 ;i <N; i++){
-        //     printf("result_array[%d]=%d\n", i, resultarray[i]);
-        // }
+         for(int i = 0 ;i <N; i++){
+             printf("result_array[%d]=%d\n", i, resultarray[i]);
+         }
 
         // validate results
         for (int i = 0; i < N; i++)
         {
             if(checkarray[i] != resultarray[i])
             {
-                fprintf(stderr,
+                //fprintf(stdout,
+		printf(
                         "Error: Device exclusive_scan outputs incorrect result."
                         " A[%d] = %d, expecting %d.\n",
                         i, resultarray[i], checkarray[i]);
@@ -209,17 +210,18 @@ int main(int argc, char** argv)
 
         // validate results
         if(serial_size != cu_size){
-            fprintf(stderr,
+            fprintf(stdout,
                     "Error: Device find_peaks outputs incorrect size. "
                     "Expected %d, got %d.\n",
                     serial_size, cu_size);
             exit(1);
         }
+
         for (int i = 0; i < serial_size; i++)
         {
             if(checkarray[i] != resultarray[i])
             {
-                fprintf(stderr,
+                fprintf(stdout,
                         "Error: Device find_peaks outputs incorrect result."
                         " A[%d] = %d, expecting %d.\n",
                         i, resultarray[i], checkarray[i]);

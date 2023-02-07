@@ -95,7 +95,7 @@ __global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chun
     __syncthreads();
 
     
-    if(threadIndex == blockDim.x-1) {
+    if(threadIndex == 0) {
         if(next_chunk_sum){
             next_chunk_sum[blockIdx.x] = temp[length-1];
         }
@@ -175,6 +175,7 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     // array's length is a power of 2, but this will result in extra work on
     // non-power-of-2 inputs.
     int rounded_length = nextPow2(end - inarray);
+    printf("rounded length:%d\n",rounded_length);
 
     //Allocate GPU memory for input array
     cudaCheckError(
@@ -231,8 +232,8 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     printf("Computing exclusive scan of intermediate sum array\n");
 
     //Perform exclusive scan on upsweep sum array
-    exclusive_scan(device_inter_sum_array, TPB, nullptr);
-    //exclusive_scan_kernel<<<1, (rounded_length/1024), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
+    //exclusive_scan(device_inter_sum_array, TPB, nullptr);
+    exclusive_scan_kernel<<<1, (rounded_length/2048), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
 
     printf("Completed computation of exclusive scan of intermediate sum array\n");
 
@@ -262,7 +263,7 @@ double cudaScan(int* inarray, int* end, int* resultarray)
         
         printf("DEBUG - UPSWEEP SCANNED SUM ARRAY\n");
         for(int idx = 0; idx < rounded_length; idx++){
-            printf("inter_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
+            printf("inter_sweep_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
         }
 
         delete[] inter_sum_array;
