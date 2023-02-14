@@ -438,7 +438,7 @@ int find_peaks(int *device_input, int length, int *device_output) {
         }
     #endif
     
-    int num_peaks = peak_mask_scanned[rounded_length-1];
+    int num_peaks = peak_mask_scanned[length-1];
     printf("Num of peaks found:%d", num_peaks);
 
     int* device_peak_mask_scanned;
