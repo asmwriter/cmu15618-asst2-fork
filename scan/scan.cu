@@ -395,8 +395,21 @@ int find_peaks(int *device_input, int length, int *device_output) {
     cudaCheckError(
         cudaScan(device_peak_mask_output, device_peak_mask_output+length, device_output);
     );
-    
-    
+
+    #ifdef FIND_PEAK_DEBUG
+        int* peak_output;
+        peak_output = new int[length];
+        cudaCheckError(
+            cudaMemcpy(peak_output, device_output, length * sizeof(int),
+                cudaMemcpyDeviceToHost)
+        );
+        printf("/*DEBUG - peak_output ARRAY*/ \n");
+        for(int idx = 0; idx < length; idx++){
+            printf("peak_output[%d]=%d\n",idx,peak_output[idx]);
+        }
+        delete[] peak_output;
+    #endif
+
     return 0;
 }
 
