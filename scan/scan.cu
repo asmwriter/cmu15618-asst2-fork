@@ -13,6 +13,7 @@
 
 #define TPB 1024
 //#define DEBUG 1
+//#define FIND_PEAK_DEBUG
 
 #ifdef DEBUG
 #define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
@@ -285,8 +286,6 @@ double cudaScan(int* inarray, int* end, int* resultarray)
                cudaMemcpyDeviceToHost)
     );
     
-    
-
     #ifdef DEBUG
         printf("/*DEBUG - RESULT ARRAY*/ \n");
         for(int idx = 0; idx < rounded_length; idx++){
@@ -296,7 +295,6 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     
     double endTime = CycleTimer::currentSeconds();
     double overallDuration = endTime - startTime;
-
 
     return overallDuration;
 }
@@ -331,6 +329,19 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     return overallDuration;
 }
 
+__global__ void device_find_peaks (int* in_array, int* out_array, int length) {
+    out_array[0] = 0;
+    out_array[length-1] = 0;
+        for(int i = 1; i< length; i++){
+        if(in_array[i] > in_array[i-1] && in_array[i] > in_array[i+1]){
+            out_array[i] = 1;
+        }
+        else{
+            out_array[i] = 0;
+        }
+    }
+    return;
+}
 
 
 int find_peaks(int *device_input, int length, int *device_output) {
@@ -348,8 +359,44 @@ int find_peaks(int *device_input, int length, int *device_output) {
      * it requires that. However, you must ensure that the results of
      * find_peaks are correct given the original length.
      */
-
-    cudaScan(device_input, device_input+length, device_output);
+    // if(num_threads > length) {
+    //     num_threads = length;
+    // }
+    // else{
+    //     num_threads = length / maxthreads;
+    // }
+    // int num_threads = length / maxthreads;
+    int num_threads = 1, num_blocks = 1;
+    int rounded_length = nextPow2(length);
+    int* device_peak_mask_output;
+    //Allocate auxiliary array to hold peak indices
+    cudaMalloc((void **)&device_peak_mask_output, rounded_length * sizeof(int));
+    cudaCheckError(
+        cudaMemset(device_peak_mask_output,0,rounded_length*sizeof(int))
+    );
+    //CUDA kernel launch to find and mask peak indices
+    device_find_peaks<<<num_blocks, num_threads>>>(device_input, device_peak_mask_output, length);
+    
+    #ifdef FIND_PEAK_DEBUG
+        int* peak_mask_output;
+        peak_mask_output = new int[rounded_length];
+        cudaCheckError(
+            cudaMemcpy(peak_mask_output, device_peak_mask_output, rounded_length * sizeof(int),
+                cudaMemcpyDeviceToHost)
+        );
+        printf("/*DEBUG - device_peak_mask_output ARRAY*/ \n");
+        for(int idx = 0; idx < rounded_length; idx++){
+            printf("peak_mask_output[%d]=%d\n",idx,peak_mask_output[idx]);
+        }
+        delete[] peak_mask_output;
+    #endif
+    
+    //Exclusive scan of peak indices
+    cudaCheckError(
+        cudaScan(device_peak_mask_output, device_peak_mask_output+length, device_output);
+    );
+    
+    
     return 0;
 }
 
