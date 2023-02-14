@@ -438,13 +438,14 @@ int find_peaks(int *device_input, int length, int *device_output) {
         }
     #endif
     
-    int num_peaks = peak_mask_scanned[rounded_length-1] + 1;
+    int num_peaks = peak_mask_scanned[rounded_length-1];
     printf("Num of peaks found:%d", num_peaks);
 
     int* device_peak_mask_scanned;
     cudaMalloc((void **)&device_peak_mask_scanned, rounded_length * sizeof(int));
     cudaCheckError(
-        cudaMemset(device_peak_mask_scanned,0,rounded_length*sizeof(int))
+        cudaMemcpy(device_peak_mask_scanned, peak_mask_scanned, rounded_length * sizeof(int),
+            cudaMemcpyHostToDevice)
     );
     /*Array compaction*/
     device_find_peak_indices<<<1,1>>>(device_peak_mask_output, device_peak_mask_scanned, 
