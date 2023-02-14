@@ -380,6 +380,7 @@ __global__ void device_find_peaks (int* in_array, int* peak_mask_array,
     return;
 }
 
+/*
 __global__ void device_find_peak_indices(int* device_peak_mask_output, int* device_peak_mask_scanned,
                             int* device_peak_masked_indices, int* device_output, int length){
     for(int i=0;i<length;i++){
@@ -388,6 +389,20 @@ __global__ void device_find_peak_indices(int* device_peak_mask_output, int* devi
         }
     }
 }
+*/
+
+__global__ void device_find_peak_indices(int* device_peak_mask_output, int* device_peak_mask_scanned,
+                            int* device_peak_masked_indices, int* device_output, int length){
+    
+    int g_index = blockDim.x * blockIdx.x + threadIdx.x;
+    if(g_index == 0 || g_index == length-1){
+        return;
+    }
+    if(device_peak_mask_output[g_index] == 1){
+            device_output[device_peak_mask_scanned[g_index]] = device_peak_masked_indices[g_index];
+    }
+}
+
 
 int find_peaks(int *device_input, int length, int *device_output) {
     /* TODO:
@@ -479,7 +494,7 @@ int find_peaks(int *device_input, int length, int *device_output) {
             cudaMemcpyHostToDevice)
     );
     /*Array compaction*/
-    device_find_peak_indices<<<1,1>>>(device_peak_mask_output, device_peak_mask_scanned, 
+    device_find_peak_indices<<<num_blocks,num_threads>>>(device_peak_mask_output, device_peak_mask_scanned, 
                                     device_peak_masked_indices, device_output, rounded_length);
     
     cudaCheckError(cudaThreadSynchronize());
