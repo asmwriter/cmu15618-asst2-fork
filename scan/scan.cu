@@ -340,6 +340,7 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     return overallDuration;
 }
 
+/*
 __global__ void device_find_peaks (int* in_array, int* peak_mask_array, 
                                     int* peak_indices_masked, int length) {
     peak_mask_array[0] = 0;
@@ -356,6 +357,26 @@ __global__ void device_find_peaks (int* in_array, int* peak_mask_array,
             peak_indices_masked[i] = 0;
         }
     }
+    return;
+}
+*/
+
+__global__ void device_find_peaks (int* in_array, int* peak_mask_array, 
+                                    int* peak_indices_masked, int length) {
+    int g_index = blockDim.x * blockIdx.x + threadIdx.x;
+    if(g_index == 0 || g_index == length-1){
+        peak_mask_array[g_index] = 0;
+        peak_indices_masked[g_index] = 0;
+        return;
+    }
+
+    int prev = in_array[g_index-1];
+    int cur = in_array[g_index];
+    int next = in_array[g_index+1];
+    
+    int is_peak = (prev < cur) && (cur > next); 
+    peak_mask_array[g_index] = is_peak;
+    peak_indices_masked[g_index] = is_peak*g_index;
     return;
 }
 
@@ -390,8 +411,18 @@ int find_peaks(int *device_input, int length, int *device_output) {
     //     num_threads = length / maxthreads;
     // }
     // int num_threads = length / maxthreads;
-    int num_threads = 1, num_blocks = 1;
+    int num_threads, num_blocks;
+    
     int rounded_length = nextPow2(length);
+    if( rounded_length < TPB){
+        num_threads = rounded_length;
+        num_blocks = 1;
+    }
+    else{
+        num_threads = TPB;
+        num_blocks = rounded_length/TPB;
+    }
+
     int* device_peak_mask_output;
     int* device_peak_masked_indices;
     //Allocate auxiliary array to hold peak indices and masked indices of peaks
