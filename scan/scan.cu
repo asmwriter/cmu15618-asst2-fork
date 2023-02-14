@@ -141,11 +141,17 @@ void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
      * power of 2 larger than the input.
      */
     int pow_length = nextPow2(length);
-    int chunk_size = TPB;
-    int num_block;
-    int threads_per_block = TPB/2;
+    int chunk_size;
+    if(pow_length < 2048){
+        chunk_size = pow_length;
+    }
+    else{
+        chunk_size = TPB;
+    }
     
-    num_block = pow_length/chunk_size;
+    int threads_per_block = chunk_size/2;
+    
+    int num_block = pow_length/chunk_size;
 
     printf("num blocks: %d\n", num_block);
 
@@ -234,7 +240,12 @@ double cudaScan(int* inarray, int* end, int* resultarray)
 
     //Perform exclusive scan on upsweep sum array
     //exclusive_scan(device_inter_sum_array, TPB, nullptr);
-    exclusive_scan_kernel<<<1, (rounded_length/2048), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
+    if(rounded_length >= 2048){
+        exclusive_scan_kernel<<<1, (rounded_length/2048), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
+    }  
+    else{
+        exclusive_scan_kernel<<<1, (rounded_length/2), (rounded_length)*sizeof(int)>>>(rounded_length, device_inter_sum_array, nullptr);
+    }
 
     printf("Completed computation of exclusive scan of intermediate sum array\n");
 
@@ -374,42 +385,41 @@ int find_peaks(int *device_input, int length, int *device_output) {
     cudaCheckError(
         cudaMemset(device_peak_mask_output,0,rounded_length*sizeof(int))
     );
+
     //CUDA kernel launch to find and mask peak indices
     device_find_peaks<<<num_blocks, num_threads>>>(device_input, device_peak_mask_output, length);
     
+    cudaCheckError(cudaThreadSynchronize());
+
+    int* peak_mask_output, *peak_mask_scanned, *peak_indices;
+    peak_mask_output = new int[rounded_length];
+    peak_mask_scanned = new int[rounded_length];
+    peak_indices = new int[rounded_length];
+    cudaCheckError(
+        cudaMemcpy(peak_mask_output, device_peak_mask_output, rounded_length * sizeof(int),
+            cudaMemcpyDeviceToHost)
+    );
     #ifdef FIND_PEAK_DEBUG
-        int* peak_mask_output;
-        peak_mask_output = new int[rounded_length];
-        cudaCheckError(
-            cudaMemcpy(peak_mask_output, device_peak_mask_output, rounded_length * sizeof(int),
-                cudaMemcpyDeviceToHost)
-        );
         printf("/*DEBUG - device_peak_mask_output ARRAY*/ \n");
         for(int idx = 0; idx < rounded_length; idx++){
             printf("peak_mask_output[%d]=%d\n",idx,peak_mask_output[idx]);
         }
-        delete[] peak_mask_output;
     #endif
     
     //Exclusive scan of peak indices
-    cudaCheckError(
-        cudaScan(device_peak_mask_output, device_peak_mask_output+length, device_output);
-    );
+    cudaScan(peak_mask_output, peak_mask_output+length, peak_mask_scanned);
 
+    cudaCheckError(cudaThreadSynchronize());
+    
     #ifdef FIND_PEAK_DEBUG
-        int* peak_output;
-        peak_output = new int[length];
-        cudaCheckError(
-            cudaMemcpy(peak_output, device_output, length * sizeof(int),
-                cudaMemcpyDeviceToHost)
-        );
-        printf("/*DEBUG - peak_output ARRAY*/ \n");
+        printf("/*DEBUG - peak_mask_scanned ARRAY*/ \n");
         for(int idx = 0; idx < length; idx++){
-            printf("peak_output[%d]=%d\n",idx,peak_output[idx]);
+            printf("peak_mask_scanned[%d]=%d\n",idx,peak_mask_scanned[idx]);
         }
-        delete[] peak_output;
     #endif
-
+    delete[] peak_mask_output;
+    delete[] peak_mask_scanned;
+    delete[] peak_indices;
     return 0;
 }
 
