@@ -340,20 +340,31 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     return overallDuration;
 }
 
-__global__ void device_find_peaks (int* in_array, int* out_array, int length) {
-    out_array[0] = 0;
-    out_array[length-1] = 0;
-        for(int i = 1; i< length; i++){
+__global__ void device_find_peaks (int* in_array, int* peak_mask_array, 
+                                    int* peak_indices_masked, int length) {
+    peak_mask_array[0] = 0;
+    peak_mask_array[length-1] = 0;
+    for(int i = 1; i< length; i++){
         if(in_array[i] > in_array[i-1] && in_array[i] > in_array[i+1]){
-            out_array[i] = 1;
+            peak_mask_array[i] = 1;
+            peak_indices_masked[i] = i;
         }
         else{
-            out_array[i] = 0;
+            peak_mask_array[i] = 0;
+            peak_indices_masked[i] = 0;
         }
     }
     return;
 }
 
+__global__ void device_find_peak_indices(int* device_peak_mask_output, int* device_peak_masked_indices, 
+                                            int* device_peak_mask_scanned, int* device_output, int length){
+    for(int i=0;i<length;i++){
+        if(device_peak_mask_output[i] == 1){
+            device_output[device_peak_mask_scanned[i]] = device_peak_masked_indices[i];
+        }
+    }
+}
 
 int find_peaks(int *device_input, int length, int *device_output) {
     /* TODO:
@@ -380,21 +391,30 @@ int find_peaks(int *device_input, int length, int *device_output) {
     int num_threads = 1, num_blocks = 1;
     int rounded_length = nextPow2(length);
     int* device_peak_mask_output;
-    //Allocate auxiliary array to hold peak indices
+    int* device_peak_masked_indices;
+    //Allocate auxiliary array to hold peak indices and masked indices of peaks
     cudaMalloc((void **)&device_peak_mask_output, rounded_length * sizeof(int));
     cudaCheckError(
         cudaMemset(device_peak_mask_output,0,rounded_length*sizeof(int))
     );
+    cudaMalloc((void **)&device_peak_masked_indices, rounded_length * sizeof(int));
+    cudaCheckError(
+        cudaMemset(device_peak_masked_indices,0,rounded_length*sizeof(int))
+    );
 
     //CUDA kernel launch to find and mask peak indices
-    device_find_peaks<<<num_blocks, num_threads>>>(device_input, device_peak_mask_output, length);
+    device_find_peaks<<<num_blocks, num_threads>>>(device_input, 
+                                device_peak_mask_output, 
+                                device_peak_masked_indices, length);
     
     cudaCheckError(cudaThreadSynchronize());
 
-    int* peak_mask_output, *peak_mask_scanned, *peak_indices;
+    int* peak_mask_output, *peak_mask_scanned;
+    int *peak_masked_indices, *peak_indices;
     peak_mask_output = new int[rounded_length];
     peak_mask_scanned = new int[rounded_length];
-    peak_indices = new int[rounded_length];
+    peak_masked_indices = new int[rounded_length];
+    /*Copy peak masks array to HOST*/
     cudaCheckError(
         cudaMemcpy(peak_mask_output, device_peak_mask_output, rounded_length * sizeof(int),
             cudaMemcpyDeviceToHost)
@@ -406,7 +426,7 @@ int find_peaks(int *device_input, int length, int *device_output) {
         }
     #endif
     
-    //Exclusive scan of peak indices
+    //Exclusive scan of peak masks array to do array compaction later
     cudaScan(peak_mask_output, peak_mask_output+length, peak_mask_scanned);
 
     cudaCheckError(cudaThreadSynchronize());
@@ -417,10 +437,24 @@ int find_peaks(int *device_input, int length, int *device_output) {
             printf("peak_mask_scanned[%d]=%d\n",idx,peak_mask_scanned[idx]);
         }
     #endif
+    
+    int num_peaks = peak_mask_scanned[rounded_length-1] + 1;
+    printf("Num of peaks found:%d", num_peaks);
+
+    int* device_peak_mask_scanned;
+    cudaMalloc((void **)&device_peak_mask_scanned, rounded_length * sizeof(int));
+    cudaCheckError(
+        cudaMemset(device_peak_mask_scanned,0,rounded_length*sizeof(int))
+    );
+    /*Array compaction*/
+    device_find_peak_indices<<<1,1>>>(device_peak_mask_output, device_peak_mask_scanned, 
+                                    device_peak_masked_indices, device_output, rounded_length);
+    
+    cudaCheckError(cudaThreadSynchronize());
+
     delete[] peak_mask_output;
     delete[] peak_mask_scanned;
-    delete[] peak_indices;
-    return 0;
+    return num_peaks;
 }
 
 
