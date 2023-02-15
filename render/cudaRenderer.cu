@@ -765,7 +765,6 @@ CudaRenderer::render() {
 __global__
 void kernel(int BOXW, int BOXH){
 
-
     //Get the current thread's pixel in the image
     //int img_pixel_idx = threadIdx.y*blockDim.x+threadIdx.x;
     int img_pixel_idx = threadIdx.x;
@@ -814,19 +813,27 @@ void kernel(int BOXW, int BOXH){
     //Get pixel row and col in the whole image
     int pixelX = img_block_col*PIXEL+img_pixel_col;
     int pixelY = img_block_row*PIXEL+img_pixel_row;
+    
+    //Get (normalised) pixel center using X,Y position in image
+    float2 pixelCenter = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
+                                         invHeight * (static_cast<float>(pixelY) + 0.5f));
+
     //Get linear index of pixel in the image
     int pixelIndex = pixelX + imageWidth*pixelY;
     
-    float uniti = (float)PIXEL/(float)imageWidth;
-    float unitj = (float)PIXEL/(float)imageHeight;    
-    
-    float boxL = (float)img_block_col *uniti;
-    float boxR = (float)(img_block_col+1)*uniti;
-    float boxT = (float)(img_block_row+1)*unitj;
-    float boxB = (float)img_block_row*unitj;
+    //float uniti = (float)PIXEL/(float)imageWidth;
+    //float unitj = (float)PIXEL/(float)imageHeight;    
+    float img_block_width_float = (float)PIXEL;
+    float image_width_float = (float)imageWidth;
+    float image_height_float = (float)imageHeight;
 
-    float2 pixelCenter = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
-                                         invHeight * (static_cast<float>(pixelY) + 0.5f));
+    //Get normalized boxLeft, boxRight coordinates for the pixel
+    float boxL = (float)img_block_col * (img_block_width_float)/(image_width_float);
+    float boxR = (float)(img_block_col+1) * (img_block_width_float)/(image_width_float);
+    //Get normalised boxBottom and top coordinates
+    float boxB = (float)img_block_row * (img_block_width_float)/(image_height_float);
+    float boxT = (float)(img_block_row+1) * (img_block_width_float)/(image_height_float);
+
     float3 p;
     float rad;
 
@@ -887,30 +894,6 @@ void kernel(int BOXW, int BOXH){
             if (pixelDist > maxDist)
                 continue;
             newColor = shadePixel_blocked(pixelCenter, p, curCircle, newColor);
-            /*
-            float3 rgb;
-            float alpha;
-        
-            if (cuConstRendererParams.sceneName == SNOWFLAKES || cuConstRendererParams.sceneName == SNOWFLAKES_SINGLE_FRAME) {
-                const float kCircleMaxAlpha = .5f;
-                const float falloffScale = 4.f;
-                float normPixelDist = sqrt(pixelDist) / rad;
-                rgb = lookupColor(normPixelDist);
-                float maxAlpha = .6f + .4f * (1.f-p.z);
-                maxAlpha = kCircleMaxAlpha * fmaxf(fminf(maxAlpha, 1.f), 0.f); 
-                alpha = maxAlpha * exp(-1.f * falloffScale * normPixelDist * normPixelDist);
-            } else {
-                rgb = *(float3*)&(cuConstRendererParams.color[curCircle3]);
-                alpha = .5f;
-            }
-        
-            float oneMinusAlpha = 1.f - alpha;
-    
-            newColor.x = alpha * rgb.x + oneMinusAlpha * newColor.x;
-            newColor.y = alpha * rgb.y + oneMinusAlpha * newColor.y;
-            newColor.z = alpha * rgb.z + oneMinusAlpha * newColor.z;
-            newColor.w = alpha + newColor.w;
-            */
         }
         __syncthreads();
     }
