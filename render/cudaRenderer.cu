@@ -904,7 +904,7 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
         *imgPtr = pixel_color_tmp;
     }
     //Wait for threads
-    __syncthreads();
+    //__syncthreads();
 }
 
 
