@@ -820,9 +820,7 @@ void kernel(int BOXW, int BOXH){
 
     //Get linear index of pixel in the image
     int pixelIndex = pixelX + imageWidth*pixelY;
-    
-    //float uniti = (float)PIXEL/(float)imageWidth;
-    //float unitj = (float)PIXEL/(float)imageHeight;    
+      
     float img_block_width_float = (float)PIXEL;
     float image_width_float = (float)imageWidth;
     float image_height_float = (float)imageHeight;
@@ -838,18 +836,19 @@ void kernel(int BOXW, int BOXH){
     float rad;
 
     float4* imgPtr;
-    float4 newColor;
+    float4 pixel_color_tmp;
 
     if (pixelX<imageWidth && pixelY<imageHeight){
         imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * pixelIndex]);
-        newColor = *imgPtr;
+        //Save current pixel's color in temporary variable
+        pixel_color_tmp = *imgPtr;
     }
 
     //Allocate shared memory for auxiliary array - sharedMemExclusiveScan
     extern __shared__ unsigned int device_circle_in_box_mask_sums[2 * BLOCKSIZE];
 
 
-    for (int it=0;it<circles_per_thread;it++){
+    for (int cur_circle=0;cur_circle<circles_per_thread;cur_circle++){
         device_circle_in_box_mask[img_pixel_idx]=0;
         device_circle_in_box_mask_scanned[img_pixel_idx]=0;
         device_circle_in_box_masked_indices[img_pixel_idx]=0;
@@ -857,20 +856,21 @@ void kernel(int BOXW, int BOXH){
         device_circle_in_box_mask_sums[img_pixel_idx*2]=0;
         __syncthreads();
 
-        int circlei = it*BLOCKSIZE+img_pixel_idx;
-        
-        if (circlei<numberOfCircles){
-            p = *(float3*)(&cuConstRendererParams.position[circlei*3]);
-            rad = cuConstRendererParams.radius[circlei];
-            device_circle_in_box_mask[img_pixel_idx]=circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
+        int cur_circle_idx = cur_circle*BLOCKSIZE+img_pixel_idx;
+        int cur_circle_in_box = 0;
+        if (cur_circle_idx<numberOfCircles){
+            p = *(float3*)(&cuConstRendererParams.position[cur_circle_idx*3]);
+            rad = cuConstRendererParams.radius[cur_circle_idx];
+            cur_circle_in_box = circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
         }
+        device_circle_in_box_mask[img_pixel_idx] = cur_circle_in_box;
         __syncthreads();
 
         sharedMemExclusiveScan(img_pixel_idx, device_circle_in_box_mask, device_circle_in_box_mask_scanned, device_circle_in_box_mask_sums, BLOCKSIZE);
         __syncthreads();
 
         if (device_circle_in_box_mask[img_pixel_idx]==1){
-            device_circle_in_box_masked_indices[device_circle_in_box_mask_scanned[img_pixel_idx]]=circlei+1;
+            device_circle_in_box_masked_indices[device_circle_in_box_mask_scanned[img_pixel_idx]]=cur_circle_idx+1;
         }
         __syncthreads();
         int circles_in_box = 0;
@@ -881,7 +881,6 @@ void kernel(int BOXW, int BOXH){
         __syncthreads();
 
         for (int i=0;i<circles_in_box;i++){
-            //if (device_circle_in_box_masked_indices[i]==0) break;
             int curCircle = device_circle_in_box_masked_indices[i]-1;
 
             int curCircle3 = 3*curCircle;
@@ -893,13 +892,13 @@ void kernel(int BOXW, int BOXH){
             float pixelDist = diffX * diffX + diffY * diffY;
             if (pixelDist > maxDist)
                 continue;
-            newColor = shadePixel_blocked(pixelCenter, p, curCircle, newColor);
+            pixel_color_tmp = shadePixel_blocked(pixelCenter, p, curCircle, pixel_color_tmp);
         }
         __syncthreads();
     }
 
     if (pixelX<imageWidth && pixelY<imageHeight){
-        *imgPtr = newColor;
+        *imgPtr = pixel_color_tmp;
     }
 }
 
