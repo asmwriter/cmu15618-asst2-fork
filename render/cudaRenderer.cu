@@ -95,8 +95,8 @@ __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
 #include "lookupColor.cu_inl"
 #include "circleBoxTest.cu_inl"
 #define IMG_BLK 32
-#define BLOCKSIZE (IMG_BLK*IMG_BLK)
-#define SCAN_BLOCK_DIM BLOCKSIZE  // needed by sharedMemExclusiveScan implementation
+#define MAX_THREADS (IMG_BLK*IMG_BLK)
+#define SCAN_BLOCK_DIM MAX_THREADS  // needed by sharedMemExclusiveScan implementation
 #include "exclusiveScan.cu_inl"
 
 // kernelClearImageSnowflake -- (CUDA device code)
@@ -758,13 +758,11 @@ CudaRenderer::render() {
 
 /*
     This kernel renders one block of the resultant image.
-    The block dimension is set with BLOCKSIZE, which is IMG_BLK*IMG_BLK
+    The block dimension is set with MAX_THREADS, which is IMG_BLK*IMG_BLK
     IMG_BLK is set to 16
 */
 
-__global__
-void kernel(int BOXW, int BOXH){
-
+__global__ void kernelRenderCircles_Blocked(int num_blocks){
     //Get the current thread's pixel in the image
     //int img_pixel_idx = threadIdx.y*blockDim.x+threadIdx.x;
     int img_pixel_idx = threadIdx.x;
@@ -774,12 +772,12 @@ void kernel(int BOXW, int BOXH){
 
     //number of circles processed by each thread in a block
     int numberOfCircles = cuConstRendererParams.numberOfCircles;
-    int circles_per_thread = (numberOfCircles+BLOCKSIZE-1)/BLOCKSIZE;
+    int circles_per_thread = (numberOfCircles+MAX_THREADS-1)/MAX_THREADS;
     
     //Allocate shared memory to check if each circle is in the image block
-    extern __shared__ unsigned int device_circle_in_box_mask[BLOCKSIZE];
-    extern __shared__ unsigned int device_circle_in_box_mask_scanned[BLOCKSIZE];
-    extern __shared__ unsigned int device_circle_in_box_masked_indices[BLOCKSIZE];
+    extern __shared__ unsigned int device_circle_in_box_mask[MAX_THREADS];
+    extern __shared__ unsigned int device_circle_in_box_mask_scanned[MAX_THREADS];
+    extern __shared__ unsigned int device_circle_in_box_masked_indices[MAX_THREADS];
 
     //Image info
     int imageWidth = cuConstRendererParams.imageWidth;
@@ -807,9 +805,11 @@ void kernel(int BOXW, int BOXH){
     img_block_col = 14 % 4 = 2
     img_block_row = 14 / 4 = 3 
     */
+    //Get total no of blocks in image grid
+    int img_cols = num_blocks;
     //Get row and column of image block in grid 
-    int img_block_col = img_block_idx % BOXW;
-    int img_block_row = img_block_idx / BOXW;
+    int img_block_col = img_block_idx % img_cols;
+    int img_block_row = img_block_idx / img_cols;
     //Get pixel row and col in the whole image
     int pixelX = img_block_col*IMG_BLK+img_pixel_col;
     int pixelY = img_block_row*IMG_BLK+img_pixel_row;
@@ -845,10 +845,10 @@ void kernel(int BOXW, int BOXH){
     }
 
     //Allocate shared memory for auxiliary array - sharedMemExclusiveScan
-    extern __shared__ unsigned int device_circle_in_box_mask_sums[2 * BLOCKSIZE];
+    extern __shared__ unsigned int device_circle_in_box_mask_sums[2 * MAX_THREADS];
 
     for (int cur_circle=0;cur_circle<circles_per_thread;cur_circle++){
-        int cur_circle_idx = cur_circle*BLOCKSIZE+img_pixel_idx;
+        int cur_circle_idx = cur_circle*MAX_THREADS+img_pixel_idx;
         int cur_circle_in_box = 0;
         if (cur_circle_idx<numberOfCircles){
             p = *(float3*)(&cuConstRendererParams.position[cur_circle_idx*3]);
@@ -864,7 +864,7 @@ void kernel(int BOXW, int BOXH){
         device_circle_in_box_mask_sums[img_pixel_idx*2]=0;
         __syncthreads();
 
-        sharedMemExclusiveScan(img_pixel_idx, device_circle_in_box_mask, device_circle_in_box_mask_scanned, device_circle_in_box_mask_sums, BLOCKSIZE);
+        sharedMemExclusiveScan(img_pixel_idx, device_circle_in_box_mask, device_circle_in_box_mask_scanned, device_circle_in_box_mask_sums, MAX_THREADS);
         __syncthreads();
 
         //Get index similar to find peak indices
@@ -874,7 +874,7 @@ void kernel(int BOXW, int BOXH){
         }
         __syncthreads();
         int circles_in_box = 0;
-        for(int cs = 0; cs<BLOCKSIZE; cs++){
+        for(int cs = 0; cs<MAX_THREADS; cs++){
             if(device_circle_in_box_masked_indices[cs] == 0){break;}
             circles_in_box++;;
         }
@@ -907,8 +907,9 @@ void kernel(int BOXW, int BOXH){
 
 void CudaRenderer::render() {
     int num_blocks = (image->width / IMG_BLK) + ((image->width % IMG_BLK == 0) ? 0 : 1);
+    int num_threads = MAX_THREADS;
     dim3 img_grid(num_blocks, num_blocks);
     
-    dim3 blockDim(BLOCKSIZE,1);
-    kernel<<<img_grid,blockDim>>>(num_blocks,num_blocks);
+    dim3 blockDim(num_threads,1);
+    kernelRenderCircles_Blocked<<<img_grid,blockDim>>>(num_blocks);
 }
