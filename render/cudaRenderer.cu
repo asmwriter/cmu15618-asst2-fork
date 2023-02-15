@@ -847,28 +847,27 @@ void kernel(int BOXW, int BOXH){
     //Allocate shared memory for auxiliary array - sharedMemExclusiveScan
     extern __shared__ unsigned int device_circle_in_box_mask_sums[2 * BLOCKSIZE];
 
-
     for (int cur_circle=0;cur_circle<circles_per_thread;cur_circle++){
-        device_circle_in_box_mask[img_pixel_idx]=0;
+        int cur_circle_idx = cur_circle*BLOCKSIZE+img_pixel_idx;
+        int cur_circle_in_box = 0;
+        if (cur_circle_idx<numberOfCircles){
+            p = *(float3*)(&cuConstRendererParams.position[cur_circle_idx*3]);
+            rad = cuConstRendererParams.radius[cur_circle_idx];                                                                                                                                                                                                                                                                
+            cur_circle_in_box = circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
+        }
+        device_circle_in_box_mask[img_pixel_idx] = cur_circle_in_box;
+        __syncthreads();
+
         device_circle_in_box_mask_scanned[img_pixel_idx]=0;
         device_circle_in_box_masked_indices[img_pixel_idx]=0;
         device_circle_in_box_mask_sums[img_pixel_idx]=0;
         device_circle_in_box_mask_sums[img_pixel_idx*2]=0;
         __syncthreads();
 
-        int cur_circle_idx = cur_circle*BLOCKSIZE+img_pixel_idx;
-        int cur_circle_in_box = 0;
-        if (cur_circle_idx<numberOfCircles){
-            p = *(float3*)(&cuConstRendererParams.position[cur_circle_idx*3]);
-            rad = cuConstRendererParams.radius[cur_circle_idx];
-            cur_circle_in_box = circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
-        }
-        device_circle_in_box_mask[img_pixel_idx] = cur_circle_in_box;
-        __syncthreads();
-
         sharedMemExclusiveScan(img_pixel_idx, device_circle_in_box_mask, device_circle_in_box_mask_scanned, device_circle_in_box_mask_sums, BLOCKSIZE);
         __syncthreads();
 
+        //Get index similar to find peak indices
         if (device_circle_in_box_mask[img_pixel_idx]==1){
             device_circle_in_box_masked_indices[device_circle_in_box_mask_scanned[img_pixel_idx]]=cur_circle_idx+1;
         }
@@ -882,7 +881,6 @@ void kernel(int BOXW, int BOXH){
 
         for (int i=0;i<circles_in_box;i++){
             int curCircle = device_circle_in_box_masked_indices[i]-1;
-
             int curCircle3 = 3*curCircle;
             float3 p = *(float3*)(&cuConstRendererParams.position[curCircle3]);
             float rad = cuConstRendererParams.radius[curCircle];
