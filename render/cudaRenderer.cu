@@ -10,15 +10,12 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <driver_functions.h>
-#include <thrust/device_ptr.h>
-#include <thrust/scan.h>
 
 #include "cudaRenderer.h"
 #include "image.h"
 #include "noise.h"
 #include "sceneLoader.h"
 #include "util.h"
-#include "cycleTimer.h"
 
 // #define IMG_BLK 16
 #define IMG_BLK 32
@@ -26,21 +23,20 @@
 //#define MAX_THREADS 1024
 #define MAX_THREADS (IMG_BLK*IMG_BLK)
 
-#define DEBUG
 #ifdef DEBUG
-#define cudaCheckError(ans)  cudaAssert((ans), __FILE__, __LINE__);
+#define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
 inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
-   if (code != cudaSuccess)
-   {
-      fprintf(stderr, "CUDA Error: %s at %s:%d\n",
-        cudaGetErrorString(code), file, line);
-        if (abort) exit(code);
-    }
- }
- #else
- #define cudaCheckError(ans) ans
- #endif
+    if (code != cudaSuccess)
+{
+fprintf(stderr, "CUDA Error: %s at %s:%d\n",
+cudaGetErrorString(code), file, line);
+if (abort) exit(code);
+}
+}
+#else
+#define cudaCheckError(ans) ans
+#endif
 
 template <typename T>
  void print(T *device_mem, int length){
@@ -885,6 +881,7 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
         __syncthreads();
 
         for (int i=0;i<circles_in_box;i++){
+            //Circle is 1-indexed
             int circle_idx = device_circle_in_box_masked_indices[i]-1;
             int circle_idx3 = 3*circle_idx;
             float3 p = *(float3*)(&cuConstRendererParams.position[circle_idx3]);
