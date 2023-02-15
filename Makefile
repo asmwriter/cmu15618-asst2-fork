@@ -4,7 +4,7 @@ all:
 	(cd render ; make all)
 
 handin.tar: clean
-	tar cvf handin.tar saxpy scan render Makefile --exclude='render/snow.par'
+	tar cvf handin.tar saxpy scan render Makefile 
 
 clean:
 	(cd saxpy ; make clean)
