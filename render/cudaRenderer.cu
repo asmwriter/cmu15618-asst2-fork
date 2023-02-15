@@ -94,8 +94,8 @@ __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
 #include "noiseCuda.cu_inl"
 #include "lookupColor.cu_inl"
 #include "circleBoxTest.cu_inl"
-#define PIXEL 32
-#define BLOCKSIZE (PIXEL*PIXEL)
+#define IMG_BLK 32
+#define BLOCKSIZE (IMG_BLK*IMG_BLK)
 #define SCAN_BLOCK_DIM BLOCKSIZE  // needed by sharedMemExclusiveScan implementation
 #include "exclusiveScan.cu_inl"
 
@@ -769,8 +769,8 @@ void kernel(int BOXW, int BOXH){
     //int img_pixel_idx = threadIdx.y*blockDim.x+threadIdx.x;
     int img_pixel_idx = threadIdx.x;
     //Get pixel row and column in image block
-    int img_pixel_col = img_pixel_idx % PIXEL;
-    int img_pixel_row = img_pixel_idx / PIXEL;
+    int img_pixel_col = img_pixel_idx % IMG_BLK;
+    int img_pixel_row = img_pixel_idx / IMG_BLK;
 
     //number of circles processed by each thread in a block
     int numberOfCircles = cuConstRendererParams.numberOfCircles;
@@ -811,8 +811,8 @@ void kernel(int BOXW, int BOXH){
     int img_block_col = img_block_idx % BOXW;
     int img_block_row = img_block_idx / BOXW;
     //Get pixel row and col in the whole image
-    int pixelX = img_block_col*PIXEL+img_pixel_col;
-    int pixelY = img_block_row*PIXEL+img_pixel_row;
+    int pixelX = img_block_col*IMG_BLK+img_pixel_col;
+    int pixelY = img_block_row*IMG_BLK+img_pixel_row;
     
     //Get (normalised) pixel center using X,Y position in image
     float2 pixelCenter = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
@@ -821,7 +821,7 @@ void kernel(int BOXW, int BOXH){
     //Get linear index of pixel in the image
     int pixelIndex = pixelX + imageWidth*pixelY;
       
-    float img_block_width_float = (float)PIXEL;
+    float img_block_width_float = (float)IMG_BLK;
     float image_width_float = (float)imageWidth;
     float image_height_float = (float)imageHeight;
 
@@ -869,6 +869,7 @@ void kernel(int BOXW, int BOXH){
 
         //Get index similar to find peak indices
         if (device_circle_in_box_mask[img_pixel_idx]==1){
+            //Use 1-index for circle index
             device_circle_in_box_masked_indices[device_circle_in_box_mask_scanned[img_pixel_idx]]=cur_circle_idx+1;
         }
         __syncthreads();
@@ -880,19 +881,22 @@ void kernel(int BOXW, int BOXH){
         __syncthreads();
 
         for (int i=0;i<circles_in_box;i++){
-            int curCircle = device_circle_in_box_masked_indices[i]-1;
-            int curCircle3 = 3*curCircle;
-            float3 p = *(float3*)(&cuConstRendererParams.position[curCircle3]);
-            float rad = cuConstRendererParams.radius[curCircle];
+            int circle_idx = device_circle_in_box_masked_indices[i]-1;
+            int circle_idx3 = 3*circle_idx;
+            float3 p = *(float3*)(&cuConstRendererParams.position[circle_idx3]);
+            float rad = cuConstRendererParams.radius[circle_idx];
             float maxDist = rad * rad;
             float diffX = p.x - pixelCenter.x;
             float diffY = p.y - pixelCenter.y;
             float pixelDist = diffX * diffX + diffY * diffY;
+            //Ignore all pixels not inside the circle
             if (pixelDist > maxDist)
                 continue;
-            pixel_color_tmp = shadePixel_blocked(pixelCenter, p, curCircle, pixel_color_tmp);
+            //Update pixel with this circle's color
+            pixel_color_tmp = shadePixel_blocked(pixelCenter, p, circle_idx, pixel_color_tmp);
         }
         __syncthreads();
+        //Repeat for all circles
     }
 
     if (pixelX<imageWidth && pixelY<imageHeight){
@@ -902,8 +906,9 @@ void kernel(int BOXW, int BOXH){
 
 
 void CudaRenderer::render() {
-    int BOXW=(image->width+PIXEL-1)/PIXEL;
-    int BOXH=(image->height+PIXEL-1)/PIXEL;
+    
+    int BOXW=(image->width+IMG_BLK-1)/IMG_BLK;
+    int BOXH=(image->height+IMG_BLK-1)/IMG_BLK;
     dim3 gridDim(BOXW,BOXH);
     dim3 blockDim(BLOCKSIZE,1);
     kernel<<<gridDim,blockDim>>>(BOXW,BOXH);
