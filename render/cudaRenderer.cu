@@ -852,7 +852,9 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
         int cur_circle_in_box = 0;
         if (cur_circle_idx<numberOfCircles){
             p = *(float3*)(&cuConstRendererParams.position[cur_circle_idx*3]);
-            rad = cuConstRendererParams.radius[cur_circle_idx];                                                                                                                                                                                                                                                                
+            rad = cuConstRendererParams.radius[cur_circle_idx];  
+            //Pass circle info and image block boundaries to check if the circle is 
+            //intersecting the current image block                                                                                                                                                                                                                                                              
             cur_circle_in_box = circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
         }
         device_circle_in_box_mask[img_pixel_idx] = cur_circle_in_box;
@@ -910,6 +912,5 @@ void CudaRenderer::render() {
     int num_threads = MAX_THREADS;
     dim3 img_grid(num_blocks, num_blocks);
     
-    dim3 blockDim(num_threads,1);
-    kernelRenderCircles_Blocked<<<img_grid,blockDim>>>(num_blocks);
+    kernelRenderCircles_Blocked<<<img_grid,num_threads>>>(num_blocks);
 }
