@@ -756,39 +756,74 @@ CudaRenderer::render() {
 }
 */
 
+/*
+    This kernel renders one block of the resultant image.
+    The block dimension is set with BLOCKSIZE, which is IMG_BLK*IMG_BLK
+    IMG_BLK is set to 16
+*/
+
 __global__
 void kernel(int BOXW, int BOXH){
-    int imageWidth = cuConstRendererParams.imageWidth;
-    int imageHeight = cuConstRendererParams.imageHeight;
-    int imageSize = imageWidth*imageHeight;
+
+
+    //Get the current thread's pixel in the image
+    //int img_pixel_idx = threadIdx.y*blockDim.x+threadIdx.x;
+    int img_pixel_idx = threadIdx.x;
+    //Get pixel row and column in image block
+    int img_pixel_col = img_pixel_idx % PIXEL;
+    int img_pixel_row = img_pixel_idx / PIXEL;
+
+    //number of circles processed by each thread in a block
     int numberOfCircles = cuConstRendererParams.numberOfCircles;
-
-    int BOXId = blockIdx.y*gridDim.x+blockIdx.x;
+    int circles_per_thread = (numberOfCircles+BLOCKSIZE-1)/BLOCKSIZE;
     
-    int BOXi = BOXId%BOXW;
-    int BOXj = BOXId/BOXW;
-    int PIXELId = threadIdx.y*blockDim.x+threadIdx.x;
-    int PIXELi = PIXELId%PIXEL;
-    int PIXELj = PIXELId/PIXEL;
-    int pixelX = BOXi*PIXEL+PIXELi;
-    int pixelY = BOXj*PIXEL+PIXELj;
-    int pixelIndex = pixelY*imageWidth+pixelX;
-
-    float uniti = (float)PIXEL/(float)imageWidth;
-    float unitj = (float)PIXEL/(float)imageHeight;
-    float invWidth = 1.f / imageWidth;
-    float invHeight = 1.f / imageHeight;
-    
-    int ITER = (numberOfCircles+BLOCKSIZE-1)/BLOCKSIZE;
-    
+    //Allocate shared memory to check if each circle is in the image block
     extern __shared__ unsigned int device_circle_in_box_mask[BLOCKSIZE];
     extern __shared__ unsigned int device_circle_in_box_mask_scanned[BLOCKSIZE];
     extern __shared__ unsigned int device_circle_in_box_masked_indices[BLOCKSIZE];
 
-    float boxL = (float)BOXi *uniti;
-    float boxR = (float)(BOXi+1)*uniti;
-    float boxT = (float)(BOXj+1)*unitj;
-    float boxB = (float)BOXj*unitj;
+    //Image info
+    int imageWidth = cuConstRendererParams.imageWidth;
+    int imageHeight = cuConstRendererParams.imageHeight;
+    int imageSize = imageWidth*imageHeight;
+
+    //factor for normalisation
+    float invWidth = 1.f / imageWidth;
+    float invHeight = 1.f / imageHeight;
+
+    //Get pixel's location in imgData array
+
+    //Get image block linear index
+    int img_block_idx = blockIdx.y*gridDim.x+blockIdx.x;
+    /*
+    For W = 4
+
+    b0  b1  b2  b3
+    b4  b5  b6  b7
+    b8  b9  b10 b11
+    b12 b13 b14 b15
+
+    img_block_idx = 14
+    For b14, row = 3, col = 2
+    img_block_col = 14 % 4 = 2
+    img_block_row = 14 / 4 = 3 
+    */
+    //Get row and column of image block in grid 
+    int img_block_col = img_block_idx % BOXW;
+    int img_block_row = img_block_idx / BOXW;
+    //Get pixel row and col in the whole image
+    int pixelX = img_block_col*PIXEL+img_pixel_col;
+    int pixelY = img_block_row*PIXEL+img_pixel_row;
+    //Get linear index of pixel in the image
+    int pixelIndex = pixelX + imageWidth*pixelY;
+    
+    float uniti = (float)PIXEL/(float)imageWidth;
+    float unitj = (float)PIXEL/(float)imageHeight;    
+    
+    float boxL = (float)img_block_col *uniti;
+    float boxR = (float)(img_block_col+1)*uniti;
+    float boxT = (float)(img_block_row+1)*unitj;
+    float boxB = (float)img_block_row*unitj;
 
     float2 pixelCenter = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
                                          invHeight * (static_cast<float>(pixelY) + 0.5f));
@@ -803,31 +838,32 @@ void kernel(int BOXW, int BOXH){
         newColor = *imgPtr;
     }
 
-    extern __shared__ unsigned int prefixSumScratch[2 * BLOCKSIZE];
+    //Allocate shared memory for auxiliary array - sharedMemExclusiveScan
+    extern __shared__ unsigned int device_circle_in_box_mask_sums[2 * BLOCKSIZE];
 
 
-    for (int it=0;it<ITER;it++){
-        device_circle_in_box_mask[PIXELId]=0;
-        device_circle_in_box_mask_scanned[PIXELId]=0;
-        device_circle_in_box_masked_indices[PIXELId]=0;
-        prefixSumScratch[PIXELId]=0;
-        prefixSumScratch[PIXELId*2]=0;
+    for (int it=0;it<circles_per_thread;it++){
+        device_circle_in_box_mask[img_pixel_idx]=0;
+        device_circle_in_box_mask_scanned[img_pixel_idx]=0;
+        device_circle_in_box_masked_indices[img_pixel_idx]=0;
+        device_circle_in_box_mask_sums[img_pixel_idx]=0;
+        device_circle_in_box_mask_sums[img_pixel_idx*2]=0;
         __syncthreads();
 
-        int circlei = it*BLOCKSIZE+PIXELId;
+        int circlei = it*BLOCKSIZE+img_pixel_idx;
         
         if (circlei<numberOfCircles){
             p = *(float3*)(&cuConstRendererParams.position[circlei*3]);
             rad = cuConstRendererParams.radius[circlei];
-            device_circle_in_box_mask[PIXELId]=circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
+            device_circle_in_box_mask[img_pixel_idx]=circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
         }
         __syncthreads();
 
-        sharedMemExclusiveScan(PIXELId, device_circle_in_box_mask, device_circle_in_box_mask_scanned, prefixSumScratch, BLOCKSIZE);
+        sharedMemExclusiveScan(img_pixel_idx, device_circle_in_box_mask, device_circle_in_box_mask_scanned, device_circle_in_box_mask_sums, BLOCKSIZE);
         __syncthreads();
 
-        if (device_circle_in_box_mask[PIXELId]==1){
-            device_circle_in_box_masked_indices[device_circle_in_box_mask_scanned[PIXELId]]=circlei+1;
+        if (device_circle_in_box_mask[img_pixel_idx]==1){
+            device_circle_in_box_masked_indices[device_circle_in_box_mask_scanned[img_pixel_idx]]=circlei+1;
         }
         __syncthreads();
         int circles_in_box = 0;
