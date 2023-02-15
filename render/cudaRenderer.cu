@@ -95,14 +95,14 @@ __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
 #include "lookupColor.cu_inl"
 #include "circleBoxTest.cu_inl"
 
-#define SCAN_BLOCK_DIM MAX_THREADS  // needed by sharedMemExclusiveScan implementation
+#define SCAN_BLOCK_DIM MAX_THREADS 
 #include "exclusiveScan.cu_inl"
 
 // kernelClearImageSnowflake -- (CUDA device code)
 //
 // Clear the image, setting the image to the white-gray gradation that
 // is used in the snowflake image
-__global__ void kernelClearImageSnowflake(){
+__global__ void kernelClearImageSnowflake() {
 
     int imageX = blockIdx.x * blockDim.x + threadIdx.x;
     int imageY = blockIdx.y * blockDim.y + threadIdx.y;
@@ -897,7 +897,7 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
             pixel_color_tmp = shadePixel_blocked(pixelCenter, p, circle_idx, pixel_color_tmp);
         }
         __syncthreads();
-        //Repeat for all circles
+        //Repeat for all the rest of the circles
     }
     //Atomic Update to Pixel
     if (pixelX<imageWidth && pixelY<imageHeight){
