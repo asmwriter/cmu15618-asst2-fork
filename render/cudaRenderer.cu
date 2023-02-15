@@ -20,7 +20,11 @@
 #include "util.h"
 #include "cycleTimer.h"
 
-
+// #define IMG_BLK 16
+#define IMG_BLK 32
+ 
+//#define MAX_THREADS 1024
+#define MAX_THREADS (IMG_BLK*IMG_BLK)
 
 #define DEBUG
 #ifdef DEBUG
@@ -94,8 +98,7 @@ __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
 #include "noiseCuda.cu_inl"
 #include "lookupColor.cu_inl"
 #include "circleBoxTest.cu_inl"
-#define IMG_BLK 32
-#define MAX_THREADS (IMG_BLK*IMG_BLK)
+
 #define SCAN_BLOCK_DIM MAX_THREADS  // needed by sharedMemExclusiveScan implementation
 #include "exclusiveScan.cu_inl"
 
@@ -763,8 +766,7 @@ CudaRenderer::render() {
 */
 
 __global__ void kernelRenderCircles_Blocked(int num_blocks){
-    //Get the current thread's pixel in the image
-    //int img_pixel_idx = threadIdx.y*blockDim.x+threadIdx.x;
+    //Get the current thread's pixel index in the image
     int img_pixel_idx = threadIdx.x;
     //Get pixel row and column in image block
     int img_pixel_col = img_pixel_idx % IMG_BLK;
@@ -772,7 +774,8 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
 
     //number of circles processed by each thread in a block
     int numberOfCircles = cuConstRendererParams.numberOfCircles;
-    int circles_per_thread = (numberOfCircles+MAX_THREADS-1)/MAX_THREADS;
+    //int circles_per_thread = (numberOfCircles+MAX_THREADS-1)/MAX_THREADS;
+    int circles_per_thread = (numberOfCircles/MAX_THREADS ) +(numberOfCircles%MAX_THREADS==0?0:1);
     
     //Allocate shared memory to check if each circle is in the image block
     extern __shared__ unsigned int device_circle_in_box_mask[MAX_THREADS];
@@ -782,7 +785,6 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
     //Image info
     int imageWidth = cuConstRendererParams.imageWidth;
     int imageHeight = cuConstRendererParams.imageHeight;
-    int imageSize = imageWidth*imageHeight;
 
     //factor for normalisation
     float invWidth = 1.f / imageWidth;
@@ -900,10 +902,12 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
         __syncthreads();
         //Repeat for all circles
     }
-
+    //Atomic Update to Pixel
     if (pixelX<imageWidth && pixelY<imageHeight){
         *imgPtr = pixel_color_tmp;
     }
+    //Wait for threads
+    __syncthreads();
 }
 
 
