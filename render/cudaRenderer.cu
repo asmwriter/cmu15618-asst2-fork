@@ -781,10 +781,9 @@ void kernel(int BOXW, int BOXH){
     
     int ITER = (numberOfCircles+BLOCKSIZE-1)/BLOCKSIZE;
     
-    __shared__ uint TEST[BLOCKSIZE];
-    __shared__ uint PREFIX[BLOCKSIZE];
-    __shared__ uint INDEX[BLOCKSIZE];
-    __shared__ uint prefixSumScratch[2 * BLOCKSIZE];
+    extern __shared__ unsigned int device_circle_in_box_mask[BLOCKSIZE];
+    extern __shared__ unsigned int device_circle_in_box_mask_scanned[BLOCKSIZE];
+    extern __shared__ unsigned int device_circle_in_box_masked_indices[BLOCKSIZE];
 
     float boxL = (float)BOXi *uniti;
     float boxR = (float)(BOXi+1)*uniti;
@@ -804,10 +803,13 @@ void kernel(int BOXW, int BOXH){
         newColor = *imgPtr;
     }
 
+    extern __shared__ unsigned int prefixSumScratch[2 * BLOCKSIZE];
+
+
     for (int it=0;it<ITER;it++){
-        TEST[PIXELId]=0;
-        PREFIX[PIXELId]=0;
-        INDEX[PIXELId]=0;
+        device_circle_in_box_mask[PIXELId]=0;
+        device_circle_in_box_mask_scanned[PIXELId]=0;
+        device_circle_in_box_masked_indices[PIXELId]=0;
         prefixSumScratch[PIXELId]=0;
         prefixSumScratch[PIXELId*2]=0;
         __syncthreads();
@@ -817,27 +819,27 @@ void kernel(int BOXW, int BOXH){
         if (circlei<numberOfCircles){
             p = *(float3*)(&cuConstRendererParams.position[circlei*3]);
             rad = cuConstRendererParams.radius[circlei];
-            TEST[PIXELId]=circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
+            device_circle_in_box_mask[PIXELId]=circleInBox(p.x,p.y,rad,boxL,boxR,boxT,boxB);
         }
         __syncthreads();
 
-        sharedMemExclusiveScan(PIXELId, TEST, PREFIX, prefixSumScratch, BLOCKSIZE);
+        sharedMemExclusiveScan(PIXELId, device_circle_in_box_mask, device_circle_in_box_mask_scanned, prefixSumScratch, BLOCKSIZE);
         __syncthreads();
 
-        if (TEST[PIXELId]==1){
-            INDEX[PREFIX[PIXELId]]=circlei+1;
+        if (device_circle_in_box_mask[PIXELId]==1){
+            device_circle_in_box_masked_indices[device_circle_in_box_mask_scanned[PIXELId]]=circlei+1;
         }
         __syncthreads();
         int circles_in_box = 0;
         for(int cs = 0; cs<BLOCKSIZE; cs++){
-            if(INDEX[cs] == 0){break;}
+            if(device_circle_in_box_masked_indices[cs] == 0){break;}
             circles_in_box++;;
         }
         __syncthreads();
 
         for (int i=0;i<circles_in_box;i++){
-            //if (INDEX[i]==0) break;
-            int curCircle = INDEX[i]-1;
+            //if (device_circle_in_box_masked_indices[i]==0) break;
+            int curCircle = device_circle_in_box_masked_indices[i]-1;
 
             int curCircle3 = 3*curCircle;
             float3 p = *(float3*)(&cuConstRendererParams.position[curCircle3]);
@@ -881,6 +883,7 @@ void kernel(int BOXW, int BOXH){
         *imgPtr = newColor;
     }
 }
+
 
 void CudaRenderer::render() {
     int BOXW=(image->width+PIXEL-1)/PIXEL;
