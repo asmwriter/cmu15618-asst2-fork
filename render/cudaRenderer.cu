@@ -626,7 +626,7 @@ CudaRenderer::setup() {
     // See the CUDA Programmer's Guide for descriptions of
     // cudaMalloc and cudaMemcpy
 
-    // intitalize memory
+
 
     
 
@@ -910,7 +910,9 @@ __global__ void kernelRenderCircles_Blocked(int num_blocks){
 
 void CudaRenderer::render() {
     int num_blocks = (image->width / IMG_BLK) + ((image->width % IMG_BLK == 0) ? 0 : 1);
-    int num_threads = MAX_THREADS;
+    int num_threads;
+    //Maximise threads to 1024 ,num_threads = 1024
+    num_threads = MAX_THREADS;
     dim3 img_grid(num_blocks, num_blocks);
     
     kernelRenderCircles_Blocked<<<img_grid,num_threads>>>(num_blocks);
