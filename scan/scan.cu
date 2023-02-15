@@ -185,25 +185,16 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     //printf("rounded length:%d\n",rounded_length);
 
     //Allocate GPU memory for input array
-    cudaCheckError(
-    cudaMalloc((void **)&device_data, sizeof(int) * rounded_length)
-    );
+    cudaMalloc((void **)&device_data, sizeof(int) * rounded_length);
     //Allocate GPU memory for holding upsweep reduced sums/scanned sums
-    cudaCheckError(
-    cudaMalloc((void **)&device_inter_sum_array, sizeof(int) * rounded_length)
-    );
+    cudaMalloc((void **)&device_inter_sum_array, sizeof(int) * rounded_length);
     //Allocate GPU memory for debug array
-    cudaCheckError(
-    cudaMalloc((void **)&device_debug_inter_sum_array, sizeof(int) * rounded_length)
-    );
+   
+    cudaMalloc((void **)&device_debug_inter_sum_array, sizeof(int) * rounded_length);
     //Copy input array and next chunk temp array to GPU
-    cudaCheckError(
-    cudaMemcpy(device_data, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice)
-    );
+    cudaMemcpy(device_data, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice);
     //Initialise upsweep sum array and scanned sum array
-    cudaCheckError(
-    cudaMemset(device_inter_sum_array,0,rounded_length*sizeof(int))
-    );
+    cudaMemset(device_inter_sum_array,0,rounded_length*sizeof(int));
     double startTime = CycleTimer::currentSeconds();
 
     //printf("Computing exclusive scan of input array\n");
@@ -214,9 +205,7 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     //printf("Completed computation of exclusive scan of input array\n");
 
     // Wait for any work left over to be completed.
-    cudaCheckError(
-    cudaThreadSynchronize()
-    );
+    cudaThreadSynchronize();
 
     #ifdef DEBUG
         printf("/*DEBUG - INPUT ARRAY*/ \n");
@@ -225,10 +214,8 @@ double cudaScan(int* inarray, int* end, int* resultarray)
         }
         int* inter_sum_array;
         inter_sum_array = new int[rounded_length];
-        cudaCheckError(
         cudaMemcpy(inter_sum_array, device_inter_sum_array, rounded_length * sizeof(int),
-                cudaMemcpyDeviceToHost)
-        );
+                cudaMemcpyDeviceToHost);
         printf("/*DEBUG - UPSWEEP SUM ARRAY*/ \n");
         for(int idx = 0; idx < rounded_length; idx++){
             printf("inter_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
@@ -250,23 +237,19 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     //printf("Completed computation of exclusive scan of intermediate sum array\n");
 
     // Wait for any work left over to be completed.
-    cudaCheckError(cudaThreadSynchronize());
+    cudaThreadSynchronize();
 
      
 
     //Transfer input and next chunk sum array from GPU to CPU
-    cudaCheckError(
     cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
-               cudaMemcpyDeviceToHost)
-    );
+               cudaMemcpyDeviceToHost);
 
 
     
     #ifdef DEBUG
-        cudaCheckError(
         cudaMemcpy(inter_sum_array, device_inter_sum_array, rounded_length * sizeof(int),
-                cudaMemcpyDeviceToHost)
-        );
+                cudaMemcpyDeviceToHost);
 
         printf("DEBUG - RESULT ARRAY \n");
         for(int idx = 0; idx < rounded_length; idx++){
@@ -290,12 +273,10 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     //printf("Finished computing scalar vector sum kernel\n");
 
     // Wait for any work left over to be completed.
-    cudaCheckError(cudaThreadSynchronize());
+    cudaThreadSynchronize();
 
-    cudaCheckError(
     cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
-               cudaMemcpyDeviceToHost)
-    );
+               cudaMemcpyDeviceToHost);
     
     #ifdef DEBUG
         printf("/*DEBUG - RESULT ARRAY*/ \n");
@@ -442,29 +423,23 @@ int find_peaks(int *device_input, int length, int *device_output) {
     int* device_peak_masked_indices;
     //Allocate auxiliary array to hold peak indices and masked indices of peaks
     cudaMalloc((void **)&device_peak_mask_output, rounded_length * sizeof(int));
-    cudaCheckError(
-        cudaMemset(device_peak_mask_output,0,rounded_length*sizeof(int))
-    );
+        cudaMemset(device_peak_mask_output,0,rounded_length*sizeof(int));
     cudaMalloc((void **)&device_peak_masked_indices, rounded_length * sizeof(int));
-    cudaCheckError(
-        cudaMemset(device_peak_masked_indices,0,rounded_length*sizeof(int))
-    );
+        cudaMemset(device_peak_masked_indices,0,rounded_length*sizeof(int));
 
     //CUDA kernel launch to find and mask peak indices
     device_find_peaks<<<num_blocks, num_threads>>>(device_input, 
                                 device_peak_mask_output, 
                                 device_peak_masked_indices, length);
     
-    cudaCheckError(cudaThreadSynchronize());
+    cudaThreadSynchronize();
 
     int* peak_mask_output, *peak_mask_scanned;
     peak_mask_output = new int[rounded_length];
     peak_mask_scanned = new int[rounded_length];
     /*Copy peak masks array to HOST*/
-    cudaCheckError(
         cudaMemcpy(peak_mask_output, device_peak_mask_output, rounded_length * sizeof(int),
-            cudaMemcpyDeviceToHost)
-    );
+            cudaMemcpyDeviceToHost);
     #ifdef FIND_PEAK_DEBUG
         printf("/*DEBUG - device_peak_mask_output ARRAY*/ \n");
         for(int idx = 0; idx < rounded_length; idx++){
@@ -475,7 +450,7 @@ int find_peaks(int *device_input, int length, int *device_output) {
     //Exclusive scan of peak masks array to do array compaction later
     cudaScan(peak_mask_output, peak_mask_output+length, peak_mask_scanned);
 
-    cudaCheckError(cudaThreadSynchronize());
+    cudaThreadSynchronize();
     
     #ifdef FIND_PEAK_DEBUG
         printf("/*DEBUG - peak_mask_scanned ARRAY*/ \n");
@@ -489,15 +464,13 @@ int find_peaks(int *device_input, int length, int *device_output) {
 
     int* device_peak_mask_scanned;
     cudaMalloc((void **)&device_peak_mask_scanned, rounded_length * sizeof(int));
-    cudaCheckError(
         cudaMemcpy(device_peak_mask_scanned, peak_mask_scanned, rounded_length * sizeof(int),
-            cudaMemcpyHostToDevice)
-    );
+            cudaMemcpyHostToDevice);
     /*Array compaction*/
     device_find_peak_indices<<<num_blocks,num_threads>>>(device_peak_mask_output, device_peak_mask_scanned, 
                                     device_peak_masked_indices, device_output, rounded_length);
     
-    cudaCheckError(cudaThreadSynchronize());
+    cudaThreadSynchronize();
 
     delete[] peak_mask_output;
     delete[] peak_mask_scanned;
