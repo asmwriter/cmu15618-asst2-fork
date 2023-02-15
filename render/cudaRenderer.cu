@@ -906,10 +906,9 @@ void kernel(int BOXW, int BOXH){
 
 
 void CudaRenderer::render() {
+    int num_blocks = (image->width / IMG_BLK) + ((image->width % IMG_BLK == 0) ? 0 : 1);
+    dim3 img_grid(num_blocks, num_blocks);
     
-    int BOXW=(image->width+IMG_BLK-1)/IMG_BLK;
-    int BOXH=(image->height+IMG_BLK-1)/IMG_BLK;
-    dim3 gridDim(BOXW,BOXH);
     dim3 blockDim(BLOCKSIZE,1);
-    kernel<<<gridDim,blockDim>>>(BOXW,BOXH);
+    kernel<<<img_grid,blockDim>>>(num_blocks,num_blocks);
 }
