@@ -53,10 +53,13 @@ saxpyCuda(int N, float alpha, float* xarray, float* yarray, float* resultarray) 
     
     //printf("Finished Copying host arrays x and y\n");
 
+    double kernelStartTime = CycleTimer::currentSeconds();
+
     // run kernel
     saxpy_kernel<<<blocks, threadsPerBlock>>>(N, alpha, device_x, device_y, device_result);
     cudaThreadSynchronize();
 
+    double kernelEndTime = CycleTimer`::currentSeconds();
     //
     // TODO copy result from GPU using cudaMemcpy
     //
