@@ -61,7 +61,7 @@ void scalar_vector_sum (int* scanned_array, int* incr, int length){
     
     num_block = pow_length/chunk_size;
 
-    printf("num blocks in sum kernel: %d\n", num_block);
+    //printf("num blocks in sum kernel: %d\n", num_block);
 
     scalar_vector_sum_kernel<<<num_block,TPB,TPB*sizeof(int)>>>(scanned_array, incr);
     return;
@@ -153,7 +153,7 @@ void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
     
     int num_block = pow_length/chunk_size;
 
-    printf("num blocks: %d\n", num_block);
+    //printf("num blocks: %d\n", num_block);
 
     exclusive_scan_kernel<<<num_block, threads_per_block, chunk_size*sizeof(int)>>>(chunk_size, device_data, device_next_chunk_sum);
 
@@ -182,7 +182,7 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     // array's length is a power of 2, but this will result in extra work on
     // non-power-of-2 inputs.
     int rounded_length = nextPow2(end - inarray);
-    printf("rounded length:%d\n",rounded_length);
+    //printf("rounded length:%d\n",rounded_length);
 
     //Allocate GPU memory for input array
     cudaCheckError(
@@ -206,12 +206,12 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     );
     double startTime = CycleTimer::currentSeconds();
 
-    printf("Computing exclusive scan of input array\n");
+    //printf("Computing exclusive scan of input array\n");
 
     //Perform exclusive scan on input array
     exclusive_scan(device_data, end - inarray, device_inter_sum_array);
 
-    printf("Completed computation of exclusive scan of input array\n");
+    //printf("Completed computation of exclusive scan of input array\n");
 
     // Wait for any work left over to be completed.
     cudaCheckError(
@@ -236,7 +236,7 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     #endif
 
     
-    printf("Computing exclusive scan of intermediate sum array\n");
+    //printf("Computing exclusive scan of intermediate sum array\n");
 
     //Perform exclusive scan on upsweep sum array
     //exclusive_scan(device_inter_sum_array, TPB, nullptr);
@@ -247,7 +247,7 @@ double cudaScan(int* inarray, int* end, int* resultarray)
         exclusive_scan_kernel<<<1, (rounded_length/2), (rounded_length)*sizeof(int)>>>(rounded_length, device_inter_sum_array, nullptr);
     }
 
-    printf("Completed computation of exclusive scan of intermediate sum array\n");
+    //printf("Completed computation of exclusive scan of intermediate sum array\n");
 
     // Wait for any work left over to be completed.
     cudaCheckError(cudaThreadSynchronize());
@@ -282,12 +282,12 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     #endif
     
     
-    printf("Launching scalar vector sum kernel\n");
+    //printf("Launching scalar vector sum kernel\n");
 
     //Perform vector sum of scanned input and scanned sum array
     scalar_vector_sum(device_data, device_inter_sum_array, rounded_length);
 
-    printf("Finished computing scalar vector sum kernel\n");
+    //printf("Finished computing scalar vector sum kernel\n");
 
     // Wait for any work left over to be completed.
     cudaCheckError(cudaThreadSynchronize());
@@ -485,7 +485,7 @@ int find_peaks(int *device_input, int length, int *device_output) {
     #endif
     
     int num_peaks = peak_mask_scanned[length-1];
-    printf("Num of peaks found:%d", num_peaks);
+    //printf("Num of peaks found:%d", num_peaks);
 
     int* device_peak_mask_scanned;
     cudaMalloc((void **)&device_peak_mask_scanned, rounded_length * sizeof(int));
