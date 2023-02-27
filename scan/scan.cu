@@ -11,29 +11,12 @@
 
 #include "CycleTimer.h"
 
-#define TPB 1024
-//#define DEBUG 1
-//#define FIND_PEAK_DEBUG
-
-#ifdef DEBUG
-#define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
-inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true)
-{
-    if (code != cudaSuccess)
-{
-fprintf(stderr, "CUDA Error: %s at %s:%d\n",
-cudaGetErrorString(code), file, line);
-if (abort) exit(code);
-}
-}
-#else
-#define cudaCheckError(ans) ans
-#endif
 
 extern float toBW(int bytes, float sec);
 
+int TPB=1024;
 
-/* Helper function to round up to a power of 2.
+/* Helper function to round up to a power of 2. 
  */
 static inline int nextPow2(int n)
 {
@@ -47,119 +30,77 @@ static inline int nextPow2(int n)
     return n;
 }
 
-__global__ void scalar_vector_sum_kernel (int* scanned_array, int* incr) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int scalar = incr[blockIdx.x];
-    scanned_array[index] += scalar;
+void print(int *device_mem, int length){
+    int* cpu_mem = new int[length];
+    cudaMemcpy(cpu_mem, device_mem, sizeof(int)*length, cudaMemcpyDeviceToHost);
+    for (int i=0;i<length;i++){
+        printf("%d,", cpu_mem[i]);
+    }
+    printf("\n");
+    printf("====\n");
+    free(cpu_mem);
+    return ;
 }
 
-void scalar_vector_sum (int* scanned_array, int* incr, int length){
-    int pow_length = nextPow2(length);
-    int chunk_size = TPB;
-    int num_block;
-    int threads_per_block = TPB;
-    
-    num_block = pow_length/chunk_size;
-
-    //printf("num blocks in sum kernel: %d\n", num_block);
-
-    scalar_vector_sum_kernel<<<num_block,TPB,TPB*sizeof(int)>>>(scanned_array, incr);
+__global__
+void merge(int* device_data, int size, int length){
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int r=(index+1)*size-1;
+    int l=r-size/2;
+    if (r>=length) return;
+    device_data[r]+=device_data[l];
     return;
 }
 
-__global__ void exclusive_scan_kernel (int length, int* in_array, int* next_chunk_sum) {
-
-    int base_index = blockIdx.x * 2 * blockDim.x;
-   
-    int threadIndex = threadIdx.x;
-
-    extern __shared__ int temp[];
-
-    // //Load input into the shared memory
-    temp[2*threadIndex] = in_array[base_index + (2*threadIndex)];
-    temp[2*threadIndex+1] = in_array[base_index + (2*threadIndex)+1];
-
-    int offset = 1, active = 2;
-    
-    //Up-sweep
-    for(int d = blockDim.x; d>0; d=d/2) {
-        __syncthreads();             
-        if(threadIdx.x < d){
-            int current = offset*(2*threadIdx.x + 1) -1;
-            int next = offset*(2*threadIdx.x + 2) -1;
-            temp[next] += temp[current];
-        }
-        offset*=2;
-    }
-
-   
-    __syncthreads();
-
-    
-    if(threadIndex == 0) {
-        if(next_chunk_sum){
-            next_chunk_sum[blockIdx.x] = temp[length-1];
-        }
-        temp[length-1] = 0;
-    }
-    
-    
-    //Down-sweep
-    
-    for(int d = 1; d<length; d*=2) {
-         offset /=2;
-	 __syncthreads();
-
-         if(threadIndex <d) {
-             int cur = offset*(2*threadIdx.x + 1) -1;
-             int next = offset*(2*threadIdx.x + 2) -1;
-             int t = temp[cur];
-             temp[cur] = temp[next];
-             temp[next] += t;
-         }
-
-     }
-     
-    __syncthreads();
-    in_array[base_index + (2*threadIndex)] = temp[2*threadIndex] ;
-    in_array[base_index + (2*threadIndex) + 1] = temp[2*threadIndex+1] ;
-    
+__global__
+void swap(int* device_data, int size, int rounded){
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int r=(index+1)*size-1;
+    int l=r-size/2;
+    if (r>=rounded) return;
+    int tmp=device_data[r];
+    device_data[r]+=device_data[l];
+    device_data[l]=tmp;
+    return;
 }
 
-void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
+void exclusive_scan(int* device_data, int length)
 {
     /* TODO
      * Fill in this function with your exclusive scan implementation.
      * You are passed the locations of the data in device memory
      * The data are initialized to the inputs.  Your code should
      * do an in-place scan, generating the results in the same array.
-     * This is host code -- you will need to declare one or more CUDA
+     * This is host code -- you will need to declare one or more CUDA 
      * kernels (with the __global__ decorator) in order to actually run code
      * in parallel on the GPU.
      * Note you are given the real length of the array, but may assume that
      * both the data array is sized to accommodate the next
      * power of 2 larger than the input.
      */
-    int pow_length = nextPow2(length);
-    int chunk_size;
-    if(pow_length < 2048){
-        chunk_size = pow_length;
+    int blocksPerGrid, threadsPerBlock=TPB, totalThreads;
+    int rounded = nextPow2(length);
+    int size=2;
+    while (size<=rounded/2){
+        totalThreads = rounded/size;
+        blocksPerGrid = (totalThreads+threadsPerBlock-1)/threadsPerBlock;
+        merge<<<blocksPerGrid, threadsPerBlock>>>(device_data, size, length);
+        cudaThreadSynchronize();
+        size*=2;
     }
-    else{
-        chunk_size = TPB;
+    int tmp=0;
+    cudaMemcpy(device_data+rounded-1, &tmp, sizeof(int), cudaMemcpyHostToDevice);
+    
+    size=rounded;
+    while (size>=2){
+        totalThreads = rounded/size;
+        blocksPerGrid = (totalThreads+threadsPerBlock-1)/threadsPerBlock;
+        swap<<<blocksPerGrid, threadsPerBlock>>>(device_data, size, rounded);
+        cudaThreadSynchronize();
+        size/=2;       
     }
-    
-    int threads_per_block = chunk_size/2;
-    
-    int num_block = pow_length/chunk_size;
-
-    //printf("num blocks: %d\n", num_block);
-
-    exclusive_scan_kernel<<<num_block, threads_per_block, chunk_size*sizeof(int)>>>(chunk_size, device_data, device_next_chunk_sum);
-
     return;
 }
-
 
 
 /* This function is a wrapper around the code you will write - it copies the
@@ -168,126 +109,31 @@ void exclusive_scan(int* device_data, int length, int* device_next_chunk_sum)
  */
 double cudaScan(int* inarray, int* end, int* resultarray)
 {
-    //GPU pointer for input array
     int* device_data;
-    //GPU pointer for holding upsweep sum of intermediate blocks/scanned upsweep sums
-    int* device_inter_sum_array;
-    //Debug GPU pointer
-    int* device_debug_inter_sum_array;
-    
     // We round the array size up to a power of 2, but elements after
     // the end of the original input are left uninitialized and not checked
-    // for correctness.
-    // You may have an easier time in your implementation if you assume the
+    // for correctness. 
+    // You may have an easier time in your implementation if you assume the 
     // array's length is a power of 2, but this will result in extra work on
     // non-power-of-2 inputs.
-    int rounded_length = nextPow2(end - inarray);
-    //printf("rounded length:%d\n",rounded_length);
 
-    //Allocate GPU memory for input array
+    int rounded_length = nextPow2(end - inarray);
     cudaMalloc((void **)&device_data, sizeof(int) * rounded_length);
-    //Allocate GPU memory for holding upsweep reduced sums/scanned sums
-    cudaMalloc((void **)&device_inter_sum_array, sizeof(int) * rounded_length);
-    //Allocate GPU memory for debug array
-   
-    cudaMalloc((void **)&device_debug_inter_sum_array, sizeof(int) * rounded_length);
-    //Copy input array and next chunk temp array to GPU
-    cudaMemcpy(device_data, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice);
-    //Initialise upsweep sum array and scanned sum array
-    cudaMemset(device_inter_sum_array,0,rounded_length*sizeof(int));
+
+    cudaMemcpy(device_data, inarray, (end - inarray) * sizeof(int), 
+               cudaMemcpyHostToDevice);
+
     double startTime = CycleTimer::currentSeconds();
 
-    //printf("Computing exclusive scan of input array\n");
-
-    //Perform exclusive scan on input array
-    exclusive_scan(device_data, end - inarray, device_inter_sum_array);
-
-    //printf("Completed computation of exclusive scan of input array\n");
+    exclusive_scan(device_data, end - inarray);
 
     // Wait for any work left over to be completed.
     cudaThreadSynchronize();
-
-    #ifdef DEBUG
-        printf("/*DEBUG - INPUT ARRAY*/ \n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("inarray[%d]=%d\n",idx,inarray[idx]);
-        }
-        int* inter_sum_array;
-        inter_sum_array = new int[rounded_length];
-        cudaMemcpy(inter_sum_array, device_inter_sum_array, rounded_length * sizeof(int),
-                cudaMemcpyDeviceToHost);
-        printf("/*DEBUG - UPSWEEP SUM ARRAY*/ \n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("inter_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
-        }
-    #endif
-
-    
-    //printf("Computing exclusive scan of intermediate sum array\n");
-
-    //Perform exclusive scan on upsweep sum array
-    //exclusive_scan(device_inter_sum_array, TPB, nullptr);
-    if(rounded_length >= 2048){
-        exclusive_scan_kernel<<<1, (rounded_length/2048), (rounded_length/1024)*sizeof(int)>>>((rounded_length/TPB), device_inter_sum_array, nullptr);
-    }  
-    else{
-        exclusive_scan_kernel<<<1, (rounded_length/2), (rounded_length)*sizeof(int)>>>(rounded_length, device_inter_sum_array, nullptr);
-    }
-
-    //printf("Completed computation of exclusive scan of intermediate sum array\n");
-
-    // Wait for any work left over to be completed.
-    cudaThreadSynchronize();
-
-     
-
-    //Transfer input and next chunk sum array from GPU to CPU
-    cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
-               cudaMemcpyDeviceToHost);
-
-
-    
-    #ifdef DEBUG
-        cudaMemcpy(inter_sum_array, device_inter_sum_array, rounded_length * sizeof(int),
-                cudaMemcpyDeviceToHost);
-
-        printf("DEBUG - RESULT ARRAY \n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("resultarray[%d]=%d\n",idx,resultarray[idx]);
-        }
-        
-        printf("DEBUG - UPSWEEP SCANNED SUM ARRAY\n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("inter_sweep_sum_array[%d]=%d\n",idx,inter_sum_array[idx]);
-        }
-
-        delete[] inter_sum_array;
-    #endif
-    
-    
-    //printf("Launching scalar vector sum kernel\n");
-
-    //Perform vector sum of scanned input and scanned sum array
-    scalar_vector_sum(device_data, device_inter_sum_array, rounded_length);
-
-    //printf("Finished computing scalar vector sum kernel\n");
-
-    // Wait for any work left over to be completed.
-    cudaThreadSynchronize();
-
-    cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
-               cudaMemcpyDeviceToHost);
-    
-    #ifdef DEBUG
-        printf("/*DEBUG - RESULT ARRAY*/ \n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("resultarray[%d]=%d\n",idx,resultarray[idx]);
-        }
-    #endif
-    
     double endTime = CycleTimer::currentSeconds();
     double overallDuration = endTime - startTime;
-
+    
+    cudaMemcpy(resultarray, device_data, (end - inarray) * sizeof(int),
+               cudaMemcpyDeviceToHost);
     return overallDuration;
 }
 
@@ -302,8 +148,8 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     int length = end - inarray;
     thrust::device_ptr<int> d_input = thrust::device_malloc<int>(length);
     thrust::device_ptr<int> d_output = thrust::device_malloc<int>(length);
-
-    cudaMemcpy(d_input.get(), inarray, length * sizeof(int),
+    
+    cudaMemcpy(d_input.get(), inarray, length * sizeof(int), 
                cudaMemcpyHostToDevice);
 
     double startTime = CycleTimer::currentSeconds();
@@ -321,67 +167,40 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     return overallDuration;
 }
 
-/*
-__global__ void device_find_peaks (int* in_array, int* peak_mask_array, 
-                                    int* peak_indices_masked, int length) {
-    peak_mask_array[0] = 0;
-    peak_mask_array[length-1] = 0;
-    peak_indices_masked[0] = 0;
-    peak_indices_masked[length-1] = 0;
-    for(int i = 1; i< length; i++){
-        if(in_array[i] > in_array[i-1] && in_array[i] > in_array[i+1]){
-            peak_mask_array[i] = 1;
-            peak_indices_masked[i] = i;
-        }
-        else{
-            peak_mask_array[i] = 0;
-            peak_indices_masked[i] = 0;
-        }
+__global__
+void checkPeak(int* device_input, int* device_output, int length){
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index>=1 && index<=length-1 &&
+        device_input[index]>device_input[index-1] &&
+        device_input[index]>device_input[index+1]){
+        device_output[index]=1;
+    }else{
+        device_output[index]=0;
     }
     return;
 }
-*/
 
-__global__ void device_find_peaks (int* in_array, int* peak_mask_array, 
-                                    int* peak_indices_masked, int length) {
-    int g_index = blockDim.x * blockIdx.x + threadIdx.x;
-    if(g_index == 0 || g_index == length-1){
-        peak_mask_array[g_index] = 0;
-        peak_indices_masked[g_index] = 0;
-        return;
-    }
-
-    int prev = in_array[g_index-1];
-    int cur = in_array[g_index];
-    int next = in_array[g_index+1];
-    
-    int is_peak = (prev < cur) && (cur > next); 
-    peak_mask_array[g_index] = is_peak;
-    peak_indices_masked[g_index] = is_peak*g_index;
+__global__
+void creatOne(int* device_input, int length){
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index>=length) return;
+    device_input[index]=1;
     return;
 }
 
-/*
-__global__ void device_find_peak_indices(int* device_peak_mask_output, int* device_peak_mask_scanned,
-                            int* device_peak_masked_indices, int* device_output, int length){
-    for(int i=0;i<length;i++){
-        if(device_peak_mask_output[i] == 1){
-            device_output[device_peak_mask_scanned[i]] = device_peak_masked_indices[i];
-        }
+__global__
+void move(int* device_input, int* device_output, int size, int length){
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int r=(index+1)*size-1;
+    int l=r-size/2;
+    if (r>=length) return;
+    int sizer=device_output[r];
+    int start=l+device_output[l];
+    for (int i=0;i<sizer;i++){
+        device_input[start+i]=device_input[r+i];
     }
-}
-*/
-
-__global__ void device_find_peak_indices(int* device_peak_mask_output, int* device_peak_mask_scanned,
-                            int* device_peak_masked_indices, int* device_output, int length){
-    
-    int g_index = blockDim.x * blockIdx.x + threadIdx.x;
-    if(g_index == 0 || g_index == length-1){
-        return;
-    }
-    if(device_peak_mask_output[g_index] == 1){
-            device_output[device_peak_mask_scanned[g_index]] = device_peak_masked_indices[g_index];
-    }
+    device_output[l]+=sizer;
+    return ;
 }
 
 
@@ -396,85 +215,42 @@ int find_peaks(int *device_input, int length, int *device_output) {
      * make use of one or more calls to exclusive_scan(), as well as
      * additional CUDA kernel launches.
      * Note: As in the scan code, we ensure that allocated arrays are a power
-     * of 2 in size, so you can use your exclusive_scan function with them if
+     * of 2 in size, so you can use your exclusive_scan function with them if 
      * it requires that. However, you must ensure that the results of
      * find_peaks are correct given the original length.
      */
-    // if(num_threads > length) {
-    //     num_threads = length;
-    // }
-    // else{
-    //     num_threads = length / maxthreads;
-    // }
-    // int num_threads = length / maxthreads;
-    int num_threads, num_blocks;
-    
-    int rounded_length = nextPow2(length);
-    if( rounded_length < TPB){
-        num_threads = rounded_length;
-        num_blocks = 1;
+
+    int blocksPerGrid, threadsPerBlock=TPB, totalThreads;
+    int rounded = nextPow2(length);
+
+    // check peak
+    totalThreads = length;
+    blocksPerGrid = (totalThreads+threadsPerBlock-1)/threadsPerBlock;
+    checkPeak<<<blocksPerGrid, threadsPerBlock>>>(device_input, device_output, length);
+    cudaThreadSynchronize();
+
+    // create one
+    totalThreads = length;
+    blocksPerGrid = (totalThreads+threadsPerBlock-1)/threadsPerBlock;
+    creatOne<<<blocksPerGrid, threadsPerBlock>>>(device_input, length);
+    cudaThreadSynchronize();
+
+    // prefix sum excluded
+    exclusive_scan(device_input, length);
+
+    // move
+    int size=2;
+    while (size<=rounded){
+        totalThreads = rounded/size;
+        blocksPerGrid = (totalThreads+threadsPerBlock-1)/threadsPerBlock;
+        move<<<blocksPerGrid, threadsPerBlock>>>(device_input, device_output, size, length);
+        cudaThreadSynchronize();
+        size*=2;
     }
-    else{
-        num_threads = TPB;
-        num_blocks = rounded_length/TPB;
-    }
-
-    int* device_peak_mask_output;
-    int* device_peak_masked_indices;
-    //Allocate auxiliary array to hold peak indices and masked indices of peaks
-    cudaMalloc((void **)&device_peak_mask_output, rounded_length * sizeof(int));
-        cudaMemset(device_peak_mask_output,0,rounded_length*sizeof(int));
-    cudaMalloc((void **)&device_peak_masked_indices, rounded_length * sizeof(int));
-        cudaMemset(device_peak_masked_indices,0,rounded_length*sizeof(int));
-
-    //CUDA kernel launch to find and mask peak indices
-    device_find_peaks<<<num_blocks, num_threads>>>(device_input, 
-                                device_peak_mask_output, 
-                                device_peak_masked_indices, length);
-    
-    cudaThreadSynchronize();
-
-    int* peak_mask_output, *peak_mask_scanned;
-    peak_mask_output = new int[rounded_length];
-    peak_mask_scanned = new int[rounded_length];
-    /*Copy peak masks array to HOST*/
-        cudaMemcpy(peak_mask_output, device_peak_mask_output, rounded_length * sizeof(int),
-            cudaMemcpyDeviceToHost);
-    #ifdef FIND_PEAK_DEBUG
-        printf("/*DEBUG - device_peak_mask_output ARRAY*/ \n");
-        for(int idx = 0; idx < rounded_length; idx++){
-            printf("peak_mask_output[%d]=%d\n",idx,peak_mask_output[idx]);
-        }
-    #endif
-    
-    //Exclusive scan of peak masks array to do array compaction later
-    cudaScan(peak_mask_output, peak_mask_output+length, peak_mask_scanned);
-
-    cudaThreadSynchronize();
-    
-    #ifdef FIND_PEAK_DEBUG
-        printf("/*DEBUG - peak_mask_scanned ARRAY*/ \n");
-        for(int idx = 0; idx < length; idx++){
-            printf("peak_mask_scanned[%d]=%d\n",idx,peak_mask_scanned[idx]);
-        }
-    #endif
-    
-    int num_peaks = peak_mask_scanned[length-1];
-    //printf("Num of peaks found:%d", num_peaks);
-
-    int* device_peak_mask_scanned;
-    cudaMalloc((void **)&device_peak_mask_scanned, rounded_length * sizeof(int));
-        cudaMemcpy(device_peak_mask_scanned, peak_mask_scanned, rounded_length * sizeof(int),
-            cudaMemcpyHostToDevice);
-    /*Array compaction*/
-    device_find_peak_indices<<<num_blocks,num_threads>>>(device_peak_mask_output, device_peak_mask_scanned, 
-                                    device_peak_masked_indices, device_output, rounded_length);
-    
-    cudaThreadSynchronize();
-
-    delete[] peak_mask_output;
-    delete[] peak_mask_scanned;
-    return num_peaks;
+    int ans;
+    cudaMemcpy(&ans, device_output, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(device_output, device_input, sizeof(int)*length, cudaMemcpyDeviceToDevice);
+    return ans;
 }
 
 
@@ -487,11 +263,11 @@ double cudaFindPeaks(int *input, int length, int *output, int *output_length) {
     int rounded_length = nextPow2(length);
     cudaMalloc((void **)&device_input, rounded_length * sizeof(int));
     cudaMalloc((void **)&device_output, rounded_length * sizeof(int));
-    cudaMemcpy(device_input, input, length * sizeof(int),
+    cudaMemcpy(device_input, input, length * sizeof(int), 
                cudaMemcpyHostToDevice);
 
     double startTime = CycleTimer::currentSeconds();
-
+    
     int result = find_peaks(device_input, length, device_output);
 
     cudaThreadSynchronize();
@@ -529,5 +305,5 @@ void printCudaInfo()
                static_cast<float>(deviceProps.totalGlobalMem) / (1024 * 1024));
         printf("   CUDA Cap:   %d.%d\n", deviceProps.major, deviceProps.minor);
     }
-    printf("---------------------------------------------------------\n");
+    printf("---------------------------------------------------------\n"); 
 }
